@@ -1,0 +1,12 @@
+# Word lock files
+~$*.docx
+
+# Build output and IDE files (the project has its own scheduling/.gitignore too)
+target/
+.idea/
+*.iml
+.vscode/
+
+# Local H2 databases
+*.mv.db
+*.trace.db

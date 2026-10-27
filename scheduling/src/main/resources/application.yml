@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: scheduling
+  mvc:
+    problemdetails:
+      enabled: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # schema is owned by Flyway
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+scheduling:
+  time-zone: ""          # blank = JVM default; set e.g. America/New_York in deployment
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
