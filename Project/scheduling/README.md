@@ -31,8 +31,8 @@ The dev profile uses in-memory H2 in PostgreSQL mode, with the console at `/h2-c
 
 | Package | Layer | Rule |
 |---|---|---|
-| `api` | presentation | controllers + DTOs; every method has `@PreAuthorize`; errors are ProblemDetail via `api.error.ApiExceptionHandler` |
-| `service` | service | transactions and department checks; throw `NotFoundException` / `ConflictingStateException` / `BusinessRuleException` |
+| `api` | presentation | controllers + request DTOs (`api.dto`, validated, plain-language messages); every method has `@PreAuthorize`; errors are ProblemDetail via `api.error.ApiExceptionHandler` |
+| `service` | service | transactions and department checks; return `service.view` records, never entities; throw `NotFoundException` / `ConflictingStateException` / `BusinessRuleException` |
 | `core` | business rules | **no Spring or JPA imports** |
 | `persistence` | data access | JPA entities + repositories; schema only via Flyway (`src/main/resources/db/migration`) |
 | `integration` | external | `SisClient` + stub; failures degrade |
@@ -54,6 +54,43 @@ Test names carry the TC-ID they cover, e.g. `@DisplayName("TC-FR4.3c: ...")`.
 | `service.NoticeService` | A | `LoggingNoticeService`; takes **ids** (`sectionId`, `bookingId`) until the entities exist |
 | `ConflictService.recheck` | B | to be added by B |
 | `SisClient` | B | to be added by B |
+| `service.CatalogService` | C | interface only; implementation to follow |
+| `service.BookingService` | C | interface only; implementation to follow |
+| `service.ImportService` | C | interface only; implementation to follow |
+
+Service implementations take the caller from `CurrentUserProvider`, never from method arguments (NFR1.3, NFR1.4).
+
+## REST API: catalog, bookings, search, import (Dev C)
+
+Roles are enforced by `@PreAuthorize` and re-checked in the service. Students get 403 on all of it (TR3.2).
+
+| Method and path | Roles | Notes |
+|---|---|---|
+| `GET /api/subjects` | Scheduler | |
+| `POST /api/subjects` | Scheduler | 201; `department` is optional |
+| `GET /api/rooms`, `GET /api/equipment` | Scheduler, Instructor | |
+| `POST /api/rooms`, `POST /api/equipment` | Scheduler | 201 |
+| `PATCH /api/rooms/{id}/status`, `PATCH /api/equipment/{id}/status` | Scheduler | body `{"status":"MAINTENANCE"}`; keeps booking history (FR2.5) |
+| `POST /api/bookings` | Scheduler, Instructor | 201; one room or one equipment item per request (TR2.6) |
+| `GET /api/bookings?status=` | Scheduler, Instructor | Scheduler sees all, Instructor only their own |
+| `POST /api/bookings/{id}/approve` | Scheduler | 409 if an overlapping approval exists (NFR3.1) |
+| `POST /api/bookings/{id}/cancel` | Scheduler | optional body `{"note":"..."}` |
+| `GET /api/search/rooms?start&end&minCapacity&roomType&equipment` | Scheduler, Instructor | FR2.4 |
+| `GET /api/search/equipment?start&end&itemType` | Scheduler, Instructor | FR2.4 |
+| `GET /api/import/templates/{type}` | Scheduler | CSV download (FR3.5) |
+| `POST /api/import/{type}` | Scheduler | multipart field `file`; 200 with a per-row outcome (FR3.6) |
+
+- Import `{type}` is one of `ready-made-schedule`, `subject-list`, `rooms`, `equipment`.
+- Date-times are ISO local, e.g. `2026-11-10T17:00:00`.
+- A partly faulty import file is not an error. Only a wrong header or an empty or unreadable file is rejected (422).
+- Uploads above Spring's multipart limit (1 MB by default) fail; raise `spring.servlet.multipart.max-file-size` if needed.
+
+| Status | Meaning |
+|---|---|
+| 400 | invalid input; field messages in the `errors` property |
+| 404 | `NotFoundException` |
+| 409 | `ConflictingStateException`, including `BookingCollisionException` |
+| 422 | `BusinessRuleException` |
 
 ## Phase 2 port: what changed
 

@@ -5,6 +5,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -56,6 +57,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		log.error("Unhandled exception", ex);
 		return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error",
 				"Something went wrong on our side. Please try again, and contact support if it keeps happening.");
+	}
+
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	public ProblemDetail handleIntegrity(DataIntegrityViolationException ex) {
+  		return problem(HttpStatus.CONFLICT, "Conflicting state",
+  			"That value already exists or is still in use. Please check it and try again.");
 	}
 
 	@Override
