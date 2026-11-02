@@ -1,7 +1,13 @@
 package persistence;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 
 /**
@@ -20,6 +26,12 @@ public class AppUserEntity extends AssignedIdEntity {
 
 	@Column(name = "department", length = 100)
 	private String department;
+
+	/** Scheduler.authorizedDepartments (TR3.4). Read it with AppUserRepository.findAuthorizedDepartments. */
+	@ElementCollection
+	@CollectionTable(name = "scheduler_department", joinColumns = @JoinColumn(name = "scheduler_id"))
+	@Column(name = "department", nullable = false, length = 100)
+	private Set<String> authorizedDepartments = new LinkedHashSet<>();
 
 	protected AppUserEntity() {
 	}
@@ -41,5 +53,9 @@ public class AppUserEntity extends AssignedIdEntity {
 
 	public String getDepartment() {
 		return department;
+	}
+
+	public void authorizeDepartment(String authorizedDepartment) {
+		authorizedDepartments.add(authorizedDepartment);
 	}
 }

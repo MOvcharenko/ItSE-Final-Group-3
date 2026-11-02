@@ -10,8 +10,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import security.CurrentUserProvider;
+import service.BookingService;
+import service.CatalogService;
+import service.ImportService;
 import service.NoticeService;
 
 @SpringBootTest
@@ -27,10 +31,20 @@ class SchedulingApplicationTests {
 	@Autowired
 	NoticeService notices;
 
+	// TODO(Dev C): remove these three once the service implementations are on main.
+	@MockitoBean
+	CatalogService catalog;
+
+	@MockitoBean
+	BookingService bookings;
+
+	@MockitoBean
+	ImportService imports;
+
 	@Test
 	@DisplayName("Context loads with the cross-stream contracts wired")
 	void contextLoads() {
-		assertThat(currentUser.get()).isNotNull();
+		assertThat(currentUser).isNotNull();
 		assertThat(notices).isNotNull();
 	}
 

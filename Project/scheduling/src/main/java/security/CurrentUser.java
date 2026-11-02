@@ -5,8 +5,8 @@ import java.util.Set;
 import domain.Role;
 
 /**
- * The signed-in user as taken from the JWT: id, role and the departments a scheduler
- * may manage. Instructor profiles are looked up by {@code id}.
+ * The signed-in user: id and role from the JWT, plus the departments a scheduler may manage
+ * from the database. Instructor profiles are looked up by {@code id}.
  */
 public record CurrentUser(String id, String displayName, Role role, Set<String> departments) {
 
