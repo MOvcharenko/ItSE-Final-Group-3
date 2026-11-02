@@ -16,12 +16,12 @@ public class LoggingNoticeService implements NoticeService {
 	private static final Logger log = LoggerFactory.getLogger(LoggingNoticeService.class);
 
 	@Override
-	public void notifyAffected(Long sectionId, NoticeEvent event) {
+	public void notifyAffected(String sectionId, NoticeEvent event) {
 		log.info("Notice (stub): section {} {}", sectionId, event);
 	}
 
 	@Override
-	public void notifyRequester(Long bookingId, NoticeEvent event) {
+	public void notifyRequester(String bookingId, NoticeEvent event) {
 		log.info("Notice (stub): booking {} {}", bookingId, event);
 	}
 

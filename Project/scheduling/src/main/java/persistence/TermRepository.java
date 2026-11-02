@@ -1,0 +1,31 @@
+package persistence;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import domain.TermStatus;
+import jakarta.persistence.LockModeType;
+
+public interface TermRepository extends JpaRepository<TermEntity, String> {
+
+	List<TermEntity> findAllByOrderByStartDateDescNameAsc();
+
+	List<TermEntity> findByStatusOrderByStartDateDescNameAsc(TermStatus status);
+
+	boolean existsByNameIgnoreCase(String name);
+
+	boolean existsByNameIgnoreCaseAndIdNot(String name, String id);
+
+	/**
+	 * Row lock: call it FIRST in any transaction that changes a term or its sections, before loading the sections.
+	 * Changes to one term queue up here, so each one sees the previous one's commit.
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select t from TermEntity t where t.id = :id")
+	Optional<TermEntity> lockById(@Param("id") String id);
+}

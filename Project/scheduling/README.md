@@ -25,7 +25,7 @@ cd Project/scheduling
 ```
 
 The dev profile uses in-memory H2 in PostgreSQL mode, with the console at `/h2-console`.
-`GET /actuator/health` is open; everything else needs authentication (JWT from Day 2).
+`GET /actuator/health` is open; everything else needs a JWT (see Signing in below).
 
 ## Packages (top level, directly under `src/main/java`)
 
@@ -50,15 +50,72 @@ Test names carry the TC-ID they cover, e.g. `@DisplayName("TC-FR4.3c: ...")`.
 
 | Interface | Owner | Day-1 stub |
 |---|---|---|
-| `security.CurrentUserProvider` | A | `StubCurrentUserProvider` (Maya Brooks, scheduler, CS + MATH); JWT-backed from Day 2 |
-| `service.NoticeService` | A | `LoggingNoticeService`; takes **ids** (`sectionId`, `bookingId`) until the entities exist |
-| `ConflictService.recheck` | B | to be added by B |
+| `security.CurrentUserProvider` | A | Done: `JwtCurrentUserProvider`, role from the token, departments from `scheduler_department` |
+| `service.NoticeService` | A | `LoggingNoticeService`; takes text **ids** (`sectionId`, `bookingId`) |
+| `service.ConflictService` | B | `NoOpConflictService` finds nothing, so publishing never asks for confirmation until B replaces it |
+| `service.TimetableService` | A | Done. Import: call `placeSection(termId, SectionPlacement)`; it applies the same rules as the API and throws `BusinessRuleException` with the reason |
 | `SisClient` | B | to be added by B |
 | `service.CatalogService` | C | interface only; implementation to follow |
 | `service.BookingService` | C | interface only; implementation to follow |
 | `service.ImportService` | C | interface only; implementation to follow |
 
 Service implementations take the caller from `CurrentUserProvider`, never from method arguments (NFR1.3, NFR1.4).
+
+## Signing in
+
+The module is a resource server with no login of its own (TR4.2). The role comes only from the token's `role` claim (`STUDENT`, `INSTRUCTOR` or `SCHEDULER`), and the display name from `name`. **The real Core Platform's claim names are still to be confirmed**; they are constants in `SecurityConfig`.
+
+In the dev and test profiles, `POST /dev/token` plays the Core Platform. It needs no token, and it does not exist in any other profile.
+
+| `userId` | Account | Role |
+|---|---|---|
+| `U01` | Maya Brooks | Scheduler (CS, MATH) |
+| `U02` | L. Bianchi | Instructor |
+| `U03` | Jordan Ellis | Student |
+
+```sh
+curl -X POST localhost:8080/dev/token -H "Content-Type: application/json" -d '{"userId":"U01"}'
+curl localhost:8080/api/subjects -H "Authorization: Bearer <accessToken>"
+```
+
+Tokens last 8 hours but stop working when the app restarts, because the signing key is generated at startup.
+
+Any other profile refuses to start unless `spring.security.oauth2.resourceserver.jwt.issuer-uri` is set.
+
+**Adding an endpoint:** give it `@PreAuthorize` and add a row to `SecurityMatrixIT.ENDPOINTS`. That test fails until you do both. In tests that load the full application, use `@ActiveProfiles("test")`.
+
+## REST API: terms and sections (Dev A)
+
+| Method and path | Roles | Notes |
+|---|---|---|
+| `GET /api/terms`, `GET /api/terms/{id}` | All | Students see only published terms; a Draft answers 404 for them |
+| `POST /api/terms` | Scheduler | 201; always starts as a Draft |
+| `PATCH /api/terms/{id}` | Scheduler | body `{"name":"..."}`; rename |
+| `DELETE /api/terms/{id}` | Scheduler | 204; Draft only, removes its sections, and the caller must be authorized for all of them. A published term answers 409 |
+| `POST /api/terms/{id}/copy` | Scheduler | 201; body `{"name":"..."}`; a new Draft with the same sections, and the caller must be authorized for all of them. A room now out of service is left empty |
+| `POST /api/terms/{id}/publish?confirm=` | Scheduler | Open High conflicts answer 409 until `confirm=true` (FR4.7) |
+| `GET /api/terms/{id}/sections` | Scheduler | |
+| `POST /api/terms/{id}/sections` | Scheduler | 201; see the body below. Conflicts never stop the save |
+| `PUT /api/terms/{id}/sections/{sectionId}` | Scheduler | Same body; replaces room, instructors, meetings and equipment. Subject and number stay fixed |
+| `DELETE /api/terms/{id}/sections/{sectionId}` | Scheduler | 204; in a Published term those affected get a cancellation notice |
+| `PATCH /api/sections/{id}/assignment` | Scheduler | `{"roomId":"...","instructorIds":["..."]}`; a field left out keeps its value (FR1.6) |
+
+```json
+{
+  "subjectId": "...", "sectionNumber": "01", "roomId": "...", "instructorIds": ["U02"],
+  "meetings": [
+    {"pattern": "WEEKLY", "day": "MONDAY", "start": "10:00", "end": "10:50"},
+    {"pattern": "EXAM", "date": "2026-12-15", "start": "09:00", "end": "11:00"}
+  ],
+  "equipment": [{"equipmentId": "...", "units": 2}]
+}
+```
+
+`sectionNumber` (default `01`) and `equipment` are optional. Schedulers can only place or edit sections of subjects in their own departments; a subject with no department yet can be handled by any Scheduler with at least one. Publishing is not limited by department, because a term can span several. Any change to a section in a Published term sends a notice; an edit that changes nothing does not.
+
+This body is `service.SectionPlacement`, not a class in `api.dto`: schedule import builds the same object, so the service checks it rather than bean validation, and its problems answer 422.
+
+Every change to a term or its sections first calls `TermRepository.lockById`, so changes to one term run one at a time. Any new code that changes sections must do the same, before loading them.
 
 ## REST API: catalog, bookings, search, import (Dev C)
 
@@ -160,7 +217,7 @@ jdbc:h2:mem:sched;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=H
 
 ### Entities: how they are written here
 
-Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEntity`, `BookingEntity`, `ImportBatchEntity` (with `ImportRowRecord`). Copy their style:
+Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEntity`, `BookingEntity`, `ImportBatchEntity` (with `ImportRowRecord`), `TermEntity`, `SectionEntity` (with `SectionMeeting`, `SectionEquipment`). Copy their style:
 
 - **Extend `AssignedIdEntity`.** It holds the id and tells Spring Data that a new object is new, so `save()` inserts straight away.
 - **Create new objects with the static `create(...)` method** (it generates the id). A fixtures loader can use the constructor that takes an id.
@@ -176,7 +233,7 @@ Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEnt
 - Names such as `findByNameIgnoreCase` and `existsByCourseCodeIgnoreCase` are generated by Spring Data from the method name.
 - `RoomRepository.lockById` and `EquipmentRepository.lockById` lock one row until the transaction ends.
 - `BookingRepository` has the queries for booking: overlap counts, busy rooms, equipment usage and the request queue.
-- Rooms and equipment used by timetable sections are **not** included in the booking queries yet. When Dev A's section-meeting entities exist, availability search must also exclude those.
+- Rooms and equipment used by timetable sections are **not** included in the booking queries yet. `SectionEntity` and `SectionRepository` now exist, so availability search can and must also exclude those.
 
 ### How booking approval stays safe
 
