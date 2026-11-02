@@ -107,3 +107,99 @@ Roles are enforced by `@PreAuthorize` and re-checked in the service. Students ge
 
 - Branches `feature/<area>-<what>`, PRs under ~400 lines, squash merge, `main` always green.
 - Reviews rotate A → B → C → A. A change to someone else's contract is a PR they approve.
+
+## Database and persistence
+
+### The short version
+
+- The database structure is defined in **one place**: the SQL files in `src/main/resources/db/migration`. Flyway runs them when the app starts.
+- Hibernate (the JPA library) never creates or changes tables. It only **checks** that our Java classes match the tables (`spring.jpa.hibernate.ddl-auto=validate`).
+- Each table that we read or write from Java has an **entity** class in the `persistence` package, plus a **repository** interface for queries.
+- Services use repositories. Controllers never touch them.
+
+### What is in the database
+
+`V1__schema.sql` creates 23 tables. They fall into five groups:
+
+| Group | Tables | Owner |
+|---|---|---|
+| People | `app_user`, `scheduler_department` | A |
+| Timetable | `term`, `section`, `section_meeting`, `section_instructor`, `section_equipment`, `notice` | A |
+| Catalogs and bookings | `subject`, `subject_equipment`, `room`, `room_fixed_equipment`, `equipment`, `booking`, `import_batch`, `import_row` | C |
+| Conflicts and availability | `conflict`, `conflict_section`, `audit_log_entry`, `instructor_availability`, `availability_submission`, `instructor_equipment_need` | B |
+| Insights | `insight_suggestion` | B |
+
+Things worth knowing before you touch it:
+
+- **A section can meet several times.** "MWF" is three rows in `section_meeting`. An exam is a row with a date instead of a weekday.
+- **No roles and no passwords.** `app_user` stores only a name, email and department. The user's role is read from the login token on every request.
+- **Students are not stored.** The SIS owns them. Enrollment numbers are asked from the SIS when needed, never copied here.
+- **A Scheduler's departments** are stored in `scheduler_department`.
+- **Names are unique** for subjects (`course_code`), rooms (`name`), equipment (`name`) and terms (`name`). The database comparison is case-sensitive, so also check with `existsBy...IgnoreCase` in the service.
+- **Nothing that is still referenced can be deleted:** rooms, equipment, subjects, bookings. Change their status instead, so booking history is kept. Deleting a term removes its sections, meetings, conflicts and insights, but not bookings or the audit log.
+- **The database refuses obviously wrong data:** zero or negative capacity, a start time that is not before the end time, a booking with both a room and an equipment item, a dismissed conflict without a reason, and so on. A service should still check first and give a friendly message, but a bug cannot silently store bad data.
+- **Ids are text** (UUIDs) created by the application, except user ids, which come from the Core Platform.
+
+### Changing the schema: migration rules
+
+1. **Never edit a migration file that is already on `main`.** Flyway remembers a checksum of each file, and the app refuses to start if one has changed. Until your branch is merged you may edit your own new file freely.
+2. **Every change is a new file** `V2__what_it_does.sql`, `V3__...`. Use plain numbers (not dates), because the tests sort files by that number.
+3. **If two people create the same version number,** the one who merges second renumbers their file.
+4. **No test or demo data in migrations.** Migrations also run in production. Put sample data in the dev/test loader (`Td1Loader`, or a `@Profile("dev")` runner). Remember that a Scheduler needs a row in `scheduler_department`, or every department check fails.
+5. Keep the SQL working on both **PostgreSQL** and **H2 in PostgreSQL mode** (so, no vendor-only features).
+
+### Looking at the database
+
+Run the app with the dev profile and open `/h2-console`. The JDBC URL is the one in `application-dev`, which should be:
+
+```
+jdbc:h2:mem:sched;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+```
+
+`SELECT * FROM flyway_schema_history;` lists the migrations that were applied.
+
+### Entities: how they are written here
+
+Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEntity`, `BookingEntity`, `ImportBatchEntity` (with `ImportRowRecord`). Copy their style:
+
+- **Extend `AssignedIdEntity`.** It holds the id and tells Spring Data that a new object is new, so `save()` inserts straight away.
+- **Create new objects with the static `create(...)` method** (it generates the id). A fixtures loader can use the constructor that takes an id.
+- **Write every table and column name explicitly:** `@Table(name = "room")`, `@Column(name = "room_type", ...)`. Never rely on automatic naming.
+- **Declare `nullable = false` exactly where the column is NOT NULL.** The mapping test checks both directions.
+- **Enums are `@Enumerated(EnumType.STRING)`.** The tables store text and have a CHECK listing the allowed values, so adding an enum value also needs a migration.
+- **Relations are `LAZY`.** If a screen needs related data, write a repository query with `join fetch` (see `BookingRepository.findQueue`), so it is one query, not one per row.
+- **Small lists** (such as a room's fixed equipment) are `@ElementCollection` with their own small table.
+- **Services never return entities.** They map them to the records in `service.view`, which is what the API sends out.
+
+### Repositories: what to know
+
+- Names such as `findByNameIgnoreCase` and `existsByCourseCodeIgnoreCase` are generated by Spring Data from the method name.
+- `RoomRepository.lockById` and `EquipmentRepository.lockById` lock one row until the transaction ends.
+- `BookingRepository` has the queries for booking: overlap counts, busy rooms, equipment usage and the request queue.
+- Rooms and equipment used by timetable sections are **not** included in the booking queries yet. When Dev A's section-meeting entities exist, availability search must also exclude those.
+
+### How booking approval stays safe
+
+Two Schedulers might approve overlapping requests for the same room at the same moment. To stop a double booking, the approving code does these steps in **one transaction**:
+
+1. Lock the room (or equipment) row with `lockById`. A second approval for the same room waits here.
+2. Count approved bookings that overlap the window (`countApprovedForRoom`).
+3. If the count is 0 (for equipment: less than its `unit_count`), mark the booking approved. Otherwise throw `BookingCollisionException`, which the API answers with HTTP 409.
+
+Two windows overlap only when each starts before the other ends. A booking that ends at 17:00 does **not** block one that starts at 17:00. Only approved bookings reserve a resource, and pending ones do not. The database alone cannot prevent this double booking. The lock in the service is what does.
+
+### Adding a new entity (checklist)
+
+1. Make sure the table exists in a migration.
+2. Write the entity in `persistence`, in the style above, and a repository next to it.
+3. Add the class to `EntityMappingTest.entities()`.
+4. Run `./mvnw verify`. The mapping test names any wrong column, missing NOT NULL, text that is too long, enum mismatch, or required column that nothing fills.
+
+### Tests
+
+| Test | What it checks | Needs Spring? |
+|---|---|---|
+| `EntityMappingTest` | Applies the migrations to H2 and compares every entity with the real tables | No |
+| `PersistenceIT` | Repository queries, the row lock, the overlap boundary, the queue fetch, import rows | Yes |
+
+Spring needs to find the entities and repositories in `persistence`. `SchedulingApplication` lives in `app`, so it must contain `@EntityScan(basePackages = "persistence")` and `@EnableJpaRepositories(basePackages = "persistence")`. Check the `@EntityScan` import with your IDE, because Spring Boot 4 moved it.
