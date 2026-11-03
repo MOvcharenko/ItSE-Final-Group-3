@@ -42,6 +42,9 @@ public class SectionEntity extends AssignedIdEntity {
 	@JoinColumn(name = "room_id")
 	private RoomEntity room;
 
+	@Column(name = "revision", nullable = false)
+	private int revision;
+
 	@ElementCollection
 	@CollectionTable(name = "section_meeting", joinColumns = @JoinColumn(name = "section_id"))
 	private List<SectionMeeting> meetings = new ArrayList<>();
@@ -97,6 +100,15 @@ public class SectionEntity extends AssignedIdEntity {
 
 	public void setRoom(RoomEntity room) {
 		this.room = room;
+	}
+
+	public int getRevision() {
+		return revision;
+	}
+
+	/** Call when something a calendar shows has changed, so an exported .ics event counts as a newer version. */
+	public void markModified() {
+		revision++;
 	}
 
 	public List<MeetingSlot> getMeetings() {

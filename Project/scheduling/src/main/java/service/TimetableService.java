@@ -249,25 +249,40 @@ public class TimetableService {
 		conflicts.recheck(termId, ConflictService.Ref.section(sectionId));
 	}
 
-	/** One path for every edit: an edit that changes nothing is not re-checked and notifies nobody. */
+	/**
+	 * One path for every edit: an edit that changes nothing is not re-checked and notifies nobody. An equipment change
+	 * is re-checked, but notifies nobody because the room and times that people rely on stay the same. One edit sends
+	 * one notice: SECTION_CHANGED also names the instructors, so it covers an edit that changes them too.
+	 */
 	private void applyChange(SectionEntity section, RoomEntity room, Set<String> instructors, Set<MeetingSlot> meetings,
 			Set<EquipmentNeed> needs) {
 		boolean scheduleChanged = !Objects.equals(section.getRoom(), room)
-				|| !new HashSet<>(section.getMeetings()).equals(meetings)
-				|| !new HashSet<>(section.getEquipment()).equals(needs);
+				|| !new HashSet<>(section.getMeetings()).equals(meetings);
 		boolean instructorsChanged = !section.getInstructorIds().equals(instructors);
-		if (!scheduleChanged && !instructorsChanged) {
+		boolean equipmentChanged = !new HashSet<>(section.getEquipment()).equals(needs);
+		if (!scheduleChanged && !instructorsChanged && !equipmentChanged) {
 			return;
 		}
+		Set<String> removedInstructors = new HashSet<>(section.getInstructorIds());
+		removedInstructors.removeAll(instructors);
 		section.setRoom(room);
 		section.setMeetings(meetings);
 		section.setInstructorIds(instructors);
 		section.setEquipment(needs);
+		if (scheduleChanged || instructorsChanged) {
+			section.markModified();
+		}
 		TermEntity term = section.getTerm();
 		conflicts.recheck(term.getId(), ConflictService.Ref.section(section.getId()));
 		if (term.isPublished()) {
-			notices.notifyAffected(section.getId(),
-					scheduleChanged ? NoticeEvent.SECTION_CHANGED : NoticeEvent.INSTRUCTOR_REASSIGNED);
+			if (scheduleChanged) {
+				notices.notifyAffected(section.getId(), NoticeEvent.SECTION_CHANGED);
+			} else if (instructorsChanged) {
+				notices.notifyAffected(section.getId(), NoticeEvent.INSTRUCTOR_REASSIGNED);
+			}
+			if (!removedInstructors.isEmpty()) {
+				notices.notifyRemovedInstructors(section.getId(), removedInstructors);
+			}
 		}
 	}
 

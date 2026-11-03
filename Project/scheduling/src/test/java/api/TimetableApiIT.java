@@ -421,6 +421,21 @@ class TimetableApiIT {
 			.andExpect(status().isOk());
 
 		verify(notices).notifyAffected(sectionId, NoticeEvent.INSTRUCTOR_REASSIGNED);
+		verify(notices).notifyRemovedInstructors(sectionId, Set.of(BIANCHI));
+	}
+
+	@Test
+	@DisplayName("TC-FR1.5: a room and instructor change together sends one notice to those affected")
+	void publishedRoomAndInstructorChange() throws Exception {
+		String sectionId = placeAndPublish();
+
+		send(patch("/api/sections/" + sectionId + "/assignment"), SCHEDULER, "{\"roomId\":\"" + otherRoomId
+				+ "\",\"instructorIds\":" + instructors(instructor()) + "}")
+			.andExpect(status().isOk());
+
+		verify(notices).notifyAffected(sectionId, NoticeEvent.SECTION_CHANGED);
+		verify(notices, never()).notifyAffected(sectionId, NoticeEvent.INSTRUCTOR_REASSIGNED);
+		verify(notices).notifyRemovedInstructors(sectionId, Set.of(BIANCHI));
 	}
 
 	@Test
@@ -437,6 +452,35 @@ class TimetableApiIT {
 		verify(notices).notifyAffected(sectionId, NoticeEvent.SECTION_CHANGED);
 		send(get("/api/terms/" + termId + "/sections"), SCHEDULER, null)
 			.andExpect(jsonPath("$[0].meetings.length()").value(1));
+	}
+
+	@Test
+	@DisplayName("An equipment-only change in a Published term saves and re-checks conflicts, but notifies nobody")
+	void publishedEquipmentChange() throws Exception {
+		String sectionId = placeAndPublish();
+		String projector = equipment.save(EquipmentEntity.create(unique("Projector"), "Projector", 3, null)).getId();
+		String withEquipment = placement(MWF).replaceFirst("}$",
+				",\"equipment\":[{\"equipmentId\":\"" + projector + "\",\"units\":1}]}");
+
+		send(put("/api/terms/" + termId + "/sections/" + sectionId), SCHEDULER, withEquipment)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.equipment[0].equipmentId").value(projector));
+
+		verify(conflicts, times(2)).recheck(termId, ConflictService.Ref.section(sectionId));
+		verify(notices, never()).notifyAffected(anyString(), any());
+	}
+
+	@Test
+	@DisplayName("A room change that also changes equipment still notifies")
+	void publishedRoomAndEquipmentChange() throws Exception {
+		String sectionId = placeAndPublish();
+		String projector = equipment.save(EquipmentEntity.create(unique("Projector"), "Projector", 3, null)).getId();
+		String body = json(subjectId, otherRoomId, instructors(BIANCHI), MWF).replaceFirst("}$",
+				",\"equipment\":[{\"equipmentId\":\"" + projector + "\",\"units\":1}]}");
+
+		send(put("/api/terms/" + termId + "/sections/" + sectionId), SCHEDULER, body).andExpect(status().isOk());
+
+		verify(notices).notifyAffected(sectionId, NoticeEvent.SECTION_CHANGED);
 	}
 
 	@Test
