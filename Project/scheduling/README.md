@@ -51,10 +51,10 @@ Test names carry the TC-ID they cover, e.g. `@DisplayName("TC-FR4.3c: ...")`.
 | Interface | Owner | Day-1 stub |
 |---|---|---|
 | `security.CurrentUserProvider` | A | Done: `JwtCurrentUserProvider`, role from the token, departments from `scheduler_department` |
-| `service.NoticeService` | A | `LoggingNoticeService`; takes text **ids** (`sectionId`, `bookingId`) |
+| `service.NoticeService` | A | Done: `PersistentNoticeService`. Takes text **ids** and saves in the caller's transaction, except students' notices, which follow after the commit. Dev B's Reassign: call `notifyAffected(sectionId, INSTRUCTOR_REASSIGNED)` and `notifyRemovedInstructors`. Dev C's booking decisions: call `notifyRequester(bookingId, event)`, after `markCancelled` so the note is included |
 | `service.ConflictService` | B | `NoOpConflictService` finds nothing, so publishing never asks for confirmation until B replaces it |
 | `service.TimetableService` | A | Done. Import: call `placeSection(termId, SectionPlacement)`; it applies the same rules as the API and throws `BusinessRuleException` with the reason |
-| `SisClient` | B | to be added by B |
+| `integration.SisClient` | B | `StubSisClient` enrolls Jordan Ellis (`U03`) in every section. Has `enrolledStudentIds` and `enrolledSectionIds`; B adds the enrollment count and shared students |
 | `service.CatalogService` | C | interface only; implementation to follow |
 | `service.BookingService` | C | interface only; implementation to follow |
 | `service.ImportService` | C | interface only; implementation to follow |
@@ -111,11 +111,57 @@ Any other profile refuses to start unless `spring.security.oauth2.resourceserver
 }
 ```
 
-`sectionNumber` (default `01`) and `equipment` are optional. Schedulers can only place or edit sections of subjects in their own departments; a subject with no department yet can be handled by any Scheduler with at least one. Publishing is not limited by department, because a term can span several. Any change to a section in a Published term sends a notice; an edit that changes nothing does not.
+`sectionNumber` (default `01`) and `equipment` are optional. Schedulers can only place or edit sections of subjects in their own departments; a subject with no department yet can be handled by any Scheduler with at least one. Publishing is not limited by department, because a term can span several. A change to a section's room, times or instructors in a Published term sends a notice. An equipment-only change re-checks conflicts but sends none, and an edit that changes nothing does neither.
 
 This body is `service.SectionPlacement`, not a class in `api.dto`: schedule import builds the same object, so the service checks it rather than bean validation, and its problems answer 422.
 
 Every change to a term or its sections first calls `TermRepository.lockById`, so changes to one term run one at a time. Any new code that changes sections must do the same, before loading them.
+
+## REST API: notices (Dev A)
+
+| Method and path | Roles | Notes |
+|---|---|---|
+| `GET /api/notices` | All | The signed-in user's own notices, newest first |
+| `POST /api/notices/{id}/read` | All | Safe to repeat. Someone else's notice answers 404 |
+
+A change to a Published term notifies the section's instructors and enrolled students. The Scheduler who made the change is not told, unless they also teach the section. One edit sends one notice, even if it changes the room, times and instructors together; an instructor taken off the section gets their own "no longer teaching" notice instead. Changes to a Draft notify nobody. A notice stays after its section is removed, with `sectionId` empty.
+
+Instructors' notices save with the change. Students' notices follow moments later on a background thread, once the change has committed, so a slow SIS holds up neither the Scheduler nor the term. If the SIS is down, the change still saves and instructors are still told, but those students are **not** notified later. The same happens if the app stops before their notices are saved.
+
+## REST API: calendar (Dev A)
+
+`GET /api/calendar` is open to all roles and returns one event per meeting per date, in time order.
+
+| Parameter | Meaning |
+|---|---|
+| `view` | `DAY`, `WEEK` (default, Monday to Sunday) or `TERM` |
+| `date` | ISO date inside the view; default today |
+| `termId` | Limit to one term. `TERM` without it uses the only term on `date`, and answers 422 if there is none or more than one. With no `termId`, a Published term hides any Draft on the same dates, so a copied term doesn't double the calendar |
+| `course`, `building` | Exact match, ignoring case |
+| `instructor`, `room` | User id and room id |
+
+| Role | Sees |
+|---|---|
+| Scheduler | Every section, including Drafts (see `termStatus` on each event). Pass `termId` to see a Draft that shares dates with a Published term |
+| Instructor | Sections they teach, in Published terms |
+| Student | Sections they are enrolled in according to the SIS, in Published terms |
+
+A blank parameter means no filter, so a form can send its unset fields. Filters only narrow this, so they can never show someone more than their role allows. If the SIS is down, a student gets an empty list with `enrollmentAvailable: false`; the UI should say that enrollment could not be loaded, not that there are no classes.
+
+### Calendar export
+
+`GET /api/calendar.ics` downloads one whole term as an iCalendar file (FR6.3). It takes the same `termId`, `date`, `course`, `instructor`, `room` and `building` parameters as a `TERM` view and shows the same sections.
+
+- A weekly meeting is one repeating event, and an exam or one-time meeting is a single event.
+- Times have no time zone, so an app shows them at the same clock time wherever it runs.
+- Draft sections, which only Schedulers can export, are marked `STATUS:TENTATIVE`.
+- A meeting keeps its event ID when it moves, and `SEQUENCE` goes up, so a calendar app can treat a new import as an update. A meeting or section that was removed is simply missing from the new file, and most apps then keep the old event. Any new code that changes a section's room, meetings or instructors must call `SectionEntity.markModified`.
+- If the SIS is down, a student's export answers 503, because an empty file would look like having no classes.
+- The endpoint needs the bearer token, so the UI has to fetch the file and then offer it for download; a plain link will not work.
+
+| Status | Meaning |
+|---|---|
+| 503 | `ServiceUnavailableException`: something this module depends on did not answer |
 
 ## REST API: catalog, bookings, search, import (Dev C)
 
@@ -217,7 +263,7 @@ jdbc:h2:mem:sched;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=H
 
 ### Entities: how they are written here
 
-Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEntity`, `BookingEntity`, `ImportBatchEntity` (with `ImportRowRecord`), `TermEntity`, `SectionEntity` (with `SectionMeeting`, `SectionEquipment`). Copy their style:
+Existing entities: `AppUserEntity`, `RoomEntity`, `EquipmentEntity`, `SubjectEntity`, `BookingEntity`, `ImportBatchEntity` (with `ImportRowRecord`), `TermEntity`, `SectionEntity` (with `SectionMeeting`, `SectionEquipment`), `NoticeEntity`. Copy their style:
 
 - **Extend `AssignedIdEntity`.** It holds the id and tells Spring Data that a new object is new, so `save()` inserts straight away.
 - **Create new objects with the static `create(...)` method** (it generates the id). A fixtures loader can use the constructor that takes an id.

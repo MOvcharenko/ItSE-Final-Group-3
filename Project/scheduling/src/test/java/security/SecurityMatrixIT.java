@@ -41,8 +41,10 @@ import app.SchedulingApplication;
 import domain.Role;
 import persistence.AppUserRepository;
 import service.BookingService;
+import service.CalendarService;
 import service.CatalogService;
 import service.ImportService;
+import service.NoticeService;
 import service.TimetableService;
 
 /**
@@ -104,7 +106,11 @@ class SecurityMatrixIT {
 			new Endpoint("POST", "/api/terms/{id}/sections", "", "{}", 201, SCHEDULER),
 			new Endpoint("PUT", "/api/terms/{id}/sections/{sectionId}", "", "{}", 200, SCHEDULER),
 			new Endpoint("DELETE", "/api/terms/{id}/sections/{sectionId}", "", null, 204, SCHEDULER),
-			new Endpoint("PATCH", "/api/sections/{id}/assignment", "", "{}", 200, SCHEDULER));
+			new Endpoint("PATCH", "/api/sections/{id}/assignment", "", "{}", 200, SCHEDULER),
+			new Endpoint("GET", "/api/notices", "", null, 200, EVERYONE),
+			new Endpoint("POST", "/api/notices/{id}/read", "", null, 200, EVERYONE),
+			new Endpoint("GET", "/api/calendar", "", null, 200, EVERYONE),
+			new Endpoint("GET", "/api/calendar.ics", "", null, 200, EVERYONE));
 
 	@Autowired
 	MockMvc mvc;
@@ -128,6 +134,12 @@ class SecurityMatrixIT {
 	@MockitoBean
 	TimetableService timetable;
 
+	@MockitoBean
+	NoticeService notices;
+
+	@MockitoBean
+	CalendarService calendar;
+
 	static Stream<Arguments> everyEndpointAndRole() {
 		return ENDPOINTS.stream().flatMap(e -> Stream.of(DevAccount.values()).map(a -> Arguments.of(e, a)));
 	}
@@ -144,7 +156,7 @@ class SecurityMatrixIT {
 		mvc.perform(endpoint.toRequest(tokenFor(account.id)))
 			.andExpect(status().is(allowed ? endpoint.success() : 403));
 		if (!allowed) {
-			verifyNoInteractions(catalog, bookings, imports, timetable);
+			verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar);
 		}
 	}
 
@@ -153,7 +165,7 @@ class SecurityMatrixIT {
 	@DisplayName("TC-NFR1.4: no token is 401 on every endpoint")
 	void noToken(Endpoint endpoint) throws Exception {
 		mvc.perform(endpoint.toRequest(null)).andExpect(status().isUnauthorized());
-		verifyNoInteractions(catalog, bookings, imports, timetable);
+		verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar);
 	}
 
 	@Test

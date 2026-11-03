@@ -23,6 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import service.BusinessRuleException;
 import service.ConflictingStateException;
 import service.NotFoundException;
+import service.ServiceUnavailableException;
 
 /**
  * Turns exceptions into RFC 9457 ProblemDetail responses with a plain-language
@@ -47,6 +48,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(BusinessRuleException.class)
 	public ProblemDetail handleBusinessRule(BusinessRuleException ex) {
 		return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Not allowed", ex.getMessage());
+	}
+
+	@ExceptionHandler(ServiceUnavailableException.class)
+	public ProblemDetail handleUnavailable(ServiceUnavailableException ex) {
+		return problem(HttpStatus.SERVICE_UNAVAILABLE, "Temporarily unavailable", ex.getMessage());
 	}
 
 	@ExceptionHandler(Exception.class)

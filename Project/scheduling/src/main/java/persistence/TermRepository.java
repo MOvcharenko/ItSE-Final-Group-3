@@ -1,5 +1,6 @@
 package persistence;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,6 +17,10 @@ public interface TermRepository extends JpaRepository<TermEntity, String> {
 	List<TermEntity> findAllByOrderByStartDateDescNameAsc();
 
 	List<TermEntity> findByStatusOrderByStartDateDescNameAsc(TermStatus status);
+
+	/** Terms that share at least one day with the window [from, to]. */
+	@Query("select t from TermEntity t where t.startDate <= :to and t.endDate >= :from order by t.startDate, t.name")
+	List<TermEntity> findOverlapping(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
 	boolean existsByNameIgnoreCase(String name);
 
