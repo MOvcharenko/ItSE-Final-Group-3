@@ -18,6 +18,8 @@ Lives in `Project/scheduling/`, next to the design material it implements:
 
 ## Build, test, run
 
+Step-by-step commands, including PowerShell, are in [commands.md](commands.md).
+
 ```sh
 cd Project/scheduling
 ./mvnw verify                                        # unit tests (*Test) + integration tests (*IT)

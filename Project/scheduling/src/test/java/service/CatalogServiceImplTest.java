@@ -79,12 +79,24 @@ class CatalogServiceImplTest {
 	}
 
 	@Test
-	void duplicateRoomNameIsRefusedIgnoringCase() {
-		when(rooms.existsByNameIgnoreCase("founders 110")).thenReturn(true);
-		var e = assertThrows(BusinessRuleException.class,
-				() -> as(TestUsers.MAYA).addRoom("founders 110", "Founders", 60, RoomType.LECTURE_HALL, List.of()));
-		assertTrue(e.getMessage().startsWith("Duplicate room name"), e.getMessage());
+	@DisplayName("A room name differing only by case or spacing is refused, because an import could not tell them apart")
+	void duplicateRoomNameIsRefusedIgnoringCaseAndSpacing() {
+		when(rooms.findAllByOrderByNameAsc()).thenReturn(List.of(
+				new RoomEntity("R1", "Founders 110", "Founders", 60, RoomType.LECTURE_HALL, Set.of())));
+		for (String same : List.of("founders 110", "Founders110", "FOUNDERS  110")) {
+			var e = assertThrows(BusinessRuleException.class,
+					() -> as(TestUsers.MAYA).addRoom(same, "Founders", 60, RoomType.LECTURE_HALL, List.of()));
+			assertEquals("Duplicate room name: '" + same + "' matches the existing room 'Founders 110'.", e.getMessage());
+		}
 		verify(rooms, never()).save(any(RoomEntity.class));
+	}
+
+	@Test
+	void similarButDifferentRoomNameIsAllowed() {
+		when(rooms.findAllByOrderByNameAsc()).thenReturn(List.of(
+				new RoomEntity("R1", "Founders 110", "Founders", 60, RoomType.LECTURE_HALL, Set.of())));
+
+		assertEquals("Founders 111", as(TestUsers.MAYA).addRoom("Founders 111", "Founders", 60, RoomType.LECTURE_HALL, List.of()).name());
 	}
 
 	@Test
@@ -188,12 +200,17 @@ class CatalogServiceImplTest {
 	}
 
 	@Test
-	@DisplayName("UC-12 6a: a duplicate subject code is refused, ignoring case")
+	@DisplayName("UC-12 6a: a duplicate subject code is refused, ignoring case and spacing")
 	void duplicateSubjectCode() {
-		when(subjects.existsByCourseCodeIgnoreCase("psy 220")).thenReturn(true);
-		var e = assertThrows(BusinessRuleException.class, () -> as(TestUsers.MAYA).addSubject("psy 220", "Again", 3,
-				RoomType.LAB, null, List.of()));
-		assertTrue(e.getMessage().startsWith("Duplicate subject code"), e.getMessage());
+		when(subjects.findAllByOrderByCourseCodeAsc()).thenReturn(List.of(
+				new SubjectEntity("S2", "PSY 220", "Cognitive Psychology", 3, RoomType.LECTURE_HALL, null, Set.of())));
+		for (String same : List.of("psy 220", "PSY220")) {
+			var e = assertThrows(BusinessRuleException.class, () -> as(TestUsers.MAYA).addSubject(same, "Again", 3,
+					RoomType.LAB, null, List.of()));
+			assertEquals("Duplicate subject code: '" + same + "' matches 'PSY 220', which is already in the catalog.",
+					e.getMessage());
+		}
+		verify(subjects, never()).save(any(SubjectEntity.class));
 	}
 
 	@Test

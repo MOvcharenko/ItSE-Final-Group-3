@@ -6,8 +6,7 @@ import java.util.Set;
 
 /**
  * What the TIMETABLE already uses in a time window, so availability search (FR2.4, UC-09) does not offer a room
- * that a class meets in every Monday morning. OWNER: Dev A (timetable stream). Implement it as a Spring bean;
- * until one exists, BookingServiceImpl treats nothing as in use (see {@link #none()}).
+ * that a class meets in every Monday morning. Implemented by {@link SectionOccupancy}.
  *
  * "In use" means: the room (or equipment) is attached to a placed section whose meeting overlaps the window, in a
  * term whose dates cover the window. A weekly meeting overlaps when its weekday matches a day in the window and its

@@ -8,6 +8,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import core.importing.Keys;
 import domain.ResourceStatus;
 import domain.RoomType;
 import persistence.EquipmentEntity;
@@ -23,7 +24,8 @@ import service.view.SubjectView;
 /**
  * Subjects, Rooms and Equipment catalogs (FR2.1, FR2.2, FR3.1, FR3.2, FR2.5).
  * ImportService also adds rows through this class, one call (= one transaction) per row, so a bad row rolls back
- * only itself. That is why every rule lives here and not in the controller.
+ * only itself. That is why every rule lives here and not in the controller. Room names and course codes must differ by
+ * more than case and spacing, because a schedule import finds them with {@link Keys}: "Hale204" must not be a second room.
  */
 @Service
 @Transactional
@@ -62,9 +64,13 @@ public class CatalogServiceImpl implements CatalogService {
 		Check.atLeastOne(creditHours, "Credit hours");
 		Check.required(defaultRoomType, "Default room type");
 		Set<String> items = Check.items(typicalEquipment, "Equipment entry", 100);
-		if (subjects.existsByCourseCodeIgnoreCase(code)) {
-			throw new BusinessRuleException("Duplicate subject code: '" + code + "' is already in the catalog.");
-		}
+		subjects.findAllByOrderByCourseCodeAsc().stream()
+				.filter(subject -> Keys.of(subject.getCourseCode()).equals(Keys.of(code)))
+				.findFirst()
+				.ifPresent(subject -> {
+					throw new BusinessRuleException("Duplicate subject code: '" + code + "' matches '"
+							+ subject.getCourseCode() + "', which is already in the catalog.");
+				});
 		SubjectEntity saved = subjects.save(SubjectEntity.create(code, name, creditHours, defaultRoomType,
 				resolveDepartment(department), items));
 		return Views.subject(saved, false); // a new subject is "Not yet scheduled" (FR3.1)
@@ -106,9 +112,13 @@ public class CatalogServiceImpl implements CatalogService {
 		Check.atLeastOne(capacity, "Capacity");
 		Check.required(roomType, "Room type");
 		Set<String> items = Check.items(fixedEquipment, "Equipment entry", 100);
-		if (rooms.existsByNameIgnoreCase(n)) {
-			throw new BusinessRuleException("Duplicate room name: '" + n + "' already exists.");
-		}
+		rooms.findAllByOrderByNameAsc().stream()
+				.filter(room -> Keys.of(room.getName()).equals(Keys.of(n)))
+				.findFirst()
+				.ifPresent(room -> {
+					throw new BusinessRuleException("Duplicate room name: '" + n + "' matches the existing room '"
+							+ room.getName() + "'.");
+				});
 		return Views.room(rooms.save(RoomEntity.create(n, b, capacity, roomType, new LinkedHashSet<>(items))));
 	}
 

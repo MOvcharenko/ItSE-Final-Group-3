@@ -20,8 +20,6 @@ public interface RoomRepository extends JpaRepository<RoomEntity, String> {
 
 	Optional<RoomEntity> findByNameIgnoreCase(String name);
 
-	boolean existsByNameIgnoreCase(String name);
-
 	/**
 	 * Row lock for atomic approval (NFR3.1): call it FIRST inside the approving transaction, then count overlaps.
 	 * Two approvals for the same room queue up here, so the second one sees the first one's commit.

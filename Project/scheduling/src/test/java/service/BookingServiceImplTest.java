@@ -363,6 +363,47 @@ class BookingServiceImplTest {
 	}
 
 	@Test
+	@DisplayName("TC-FR2.3b: a room with a class in the window cannot be approved")
+	void approvalRefusedWhenAClassUsesTheRoom() {
+		BookingEntity b = pendingRoomBooking();
+		TimetableOccupancy classes = mock(TimetableOccupancy.class);
+		when(classes.roomIdsInUse(FIVE_PM, SIX_THIRTY)).thenReturn(Set.of("R1"));
+		doReturn(classes).when(occupancy).getIfAvailable(any());
+
+		var e = assertThrows(BookingCollisionException.class, () -> as(TestUsers.MAYA).approve(b.getId()));
+
+		assertTrue(e.getMessage().contains("Founders 110 has a class scheduled"), e.getMessage());
+		assertEquals(BookingStatus.PENDING, b.getStatus());
+		verify(notices, never()).notifyRequester(any(), any());
+	}
+
+	@Test
+	@DisplayName("OI-1: classes and approved bookings together can use up every unit")
+	void approvalCountsUnitsUsedByClasses() {
+		BookingEntity b = pendingSpeakerBooking();
+		when(bookings.countApprovedForEquipment("E1", FIVE_PM, SIX_THIRTY)).thenReturn(1L);
+		TimetableOccupancy classes = mock(TimetableOccupancy.class);
+		when(classes.equipmentUnitsInUse(FIVE_PM, SIX_THIRTY)).thenReturn(Map.of("E1", 2));
+		doReturn(classes).when(occupancy).getIfAvailable(any());
+
+		var e = assertThrows(BookingCollisionException.class, () -> as(TestUsers.MAYA).approve(b.getId()));
+
+		assertTrue(e.getMessage().contains("all 3 units of Portable speaker"), e.getMessage());
+	}
+
+	@Test
+	@DisplayName("OI-1: one unit left after classes and approved bookings can still be approved")
+	void approvalAllowedWhileAUnitIsFree() {
+		BookingEntity b = pendingSpeakerBooking();
+		when(bookings.countApprovedForEquipment("E1", FIVE_PM, SIX_THIRTY)).thenReturn(1L);
+		TimetableOccupancy classes = mock(TimetableOccupancy.class);
+		when(classes.equipmentUnitsInUse(FIVE_PM, SIX_THIRTY)).thenReturn(Map.of("E1", 1));
+		doReturn(classes).when(occupancy).getIfAvailable(any());
+
+		assertEquals(BookingStatus.APPROVED, as(TestUsers.MAYA).approve(b.getId()).status());
+	}
+
+	@Test
 	void searchFilters() {
 		when(rooms.findByStatusOrderByNameAsc(ResourceStatus.AVAILABLE)).thenReturn(List.of(founders, hale, lab));
 		BookingServiceImpl s = as(TestUsers.BIANCHI);

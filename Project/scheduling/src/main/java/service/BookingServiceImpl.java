@@ -123,20 +123,10 @@ public class BookingServiceImpl implements BookingService {
 		ResourceStatus status = b.getResourceType() == ResourceType.ROOM ? b.getRoom().getStatus() : b.getEquipment().getStatus();
 		requireBookable(b.resourceName(), status);
 
-		long taken;
-		int capacity;
 		if (b.getResourceType() == ResourceType.ROOM) {
-			taken = bookings.countApprovedForRoom(b.getRoom().getId(), b.getStartTime(), b.getEndTime());
-			capacity = 1;
+			requireRoomFree(b);
 		} else {
-			taken = bookings.countApprovedForEquipment(b.getEquipment().getId(), b.getStartTime(), b.getEndTime());
-			capacity = b.getEquipment().getUnitCount(); // OI-1: a conflict only when ALL units are taken
-		}
-		if (taken >= capacity) {
-			String what = b.getResourceType() == ResourceType.ROOM
-					? b.resourceName() + " already has an approved booking that overlaps " + window(b) + "."
-					: "all " + capacity + " units of " + b.resourceName() + " are already booked for " + window(b) + ".";
-			throw new BookingCollisionException("Cannot approve: " + what);
+			requireUnitFree(b);
 		}
 
 		profiles.ensure(caller);
@@ -205,6 +195,31 @@ public class BookingServiceImpl implements BookingService {
 	}
 
 	// ---------------- helpers ----------------
+
+	/** A room was free when requested, but a class may have been placed there since, so approval checks again. */
+	private void requireRoomFree(BookingEntity b) {
+		String roomId = b.getRoom().getId();
+		if (bookings.countApprovedForRoom(roomId, b.getStartTime(), b.getEndTime()) > 0) {
+			throw new BookingCollisionException("Cannot approve: " + b.resourceName()
+					+ " already has an approved booking that overlaps " + window(b) + ".");
+		}
+		if (timetable().roomIdsInUse(b.getStartTime(), b.getEndTime()).contains(roomId)) {
+			throw new BookingCollisionException("Cannot approve: " + b.resourceName()
+					+ " has a class scheduled during " + window(b) + ".");
+		}
+	}
+
+	/** OI-1: a conflict only when ALL units are taken, by approved bookings and classes together. */
+	private void requireUnitFree(BookingEntity b) {
+		String itemId = b.getEquipment().getId();
+		long taken = bookings.countApprovedForEquipment(itemId, b.getStartTime(), b.getEndTime())
+				+ timetable().equipmentUnitsInUse(b.getStartTime(), b.getEndTime()).getOrDefault(itemId, 0);
+		int capacity = b.getEquipment().getUnitCount();
+		if (taken >= capacity) {
+			throw new BookingCollisionException("Cannot approve: all " + capacity + " units of " + b.resourceName()
+					+ " are already booked or needed by classes for " + window(b) + ".");
+		}
+	}
 
 	/**
 	 * The notice is saved in THIS transaction (NoticeService contract), so a rolled-back decision leaves no notice.
