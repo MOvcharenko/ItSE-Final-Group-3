@@ -22,6 +22,16 @@ public interface TermRepository extends JpaRepository<TermEntity, String> {
 	@Query("select t from TermEntity t where t.startDate <= :to and t.endDate >= :from order by t.startDate, t.name")
 	List<TermEntity> findOverlapping(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
+	/** Term ids and names only, for matching a typed name without loading any term. */
+	@Query("select t.id as id, t.name as name from TermEntity t")
+	List<TermName> findAllNames();
+
+	interface TermName {
+		String getId();
+
+		String getName();
+	}
+
 	boolean existsByNameIgnoreCase(String name);
 
 	boolean existsByNameIgnoreCaseAndIdNot(String name, String id);

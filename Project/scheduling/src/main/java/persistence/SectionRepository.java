@@ -17,6 +17,8 @@ public interface SectionRepository extends JpaRepository<SectionEntity, String> 
 
 	boolean existsByTerm_IdAndSubject_IdAndSectionNumber(String termId, String subjectId, String sectionNumber);
 
+	List<SectionEntity> findByTerm_IdAndSubject_Id(String termId, String subjectId);
+
 	/** Can contain null: an imported subject may have no department yet. */
 	@Query("select distinct s.subject.department from SectionEntity s where s.term.id = :termId")
 	List<String> findDepartments(@Param("termId") String termId);

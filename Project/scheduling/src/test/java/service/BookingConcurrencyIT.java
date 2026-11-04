@@ -2,6 +2,7 @@ package service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -20,8 +21,10 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import app.SchedulingApplication;
+import domain.Role;
 import domain.RoomType;
 import persistence.AppUserEntity;
 import persistence.AppUserRepository;
@@ -29,16 +32,17 @@ import persistence.BookingEntity;
 import persistence.BookingRepository;
 import persistence.RoomEntity;
 import persistence.RoomRepository;
+import security.CurrentUser;
+import security.CurrentUserProvider;
 
 /**
  * NFR3.1 / TC-FR2.3b against the real database and the real transaction + lock. Deliberately NOT @Transactional:
  * a test-wide transaction would put both "users" in one transaction and hide the race, and the data must be
  * committed before the two threads start.
  *
- * NOT run when this file was written (no Spring jars). Before relying on it check two things:
- *  1. the dev CurrentUserProvider must work from other threads: the Day-1 stub (a fixed Scheduler) does; a provider
- *     that reads the SecurityContext of the calling thread needs the context copied into each worker thread;
- *  2. it leaves nothing behind: it removes its own rows, and only creates the approver's profile row if missing.
+ * The real provider reads the signed-in user from the calling thread, which the worker threads do not have, so the
+ * approver is mocked. Notices are mocked because a saved notice would stop the test removing its bookings. It leaves
+ * nothing behind: it removes its own rows, and only creates the approver's profile row if missing.
  * The same algorithm was run against H2 and PostgreSQL 16 with plain JDBC (40 rounds each, with and without the
  * lock): without the lock every round double-booked, with it every round had exactly one winner.
  */
@@ -58,9 +62,15 @@ class BookingConcurrencyIT {
 	@Autowired
 	AppUserRepository users;
 
+	@MockitoBean
+	CurrentUserProvider currentUser;
+	@MockitoBean
+	NoticeService notices;
+
 	@RepeatedTest(5)
 	@DisplayName("TC-FR2.3b / NFR3.1: two overlapping approvals at the same instant: exactly one wins, the other is refused")
 	void exactlyOneOfTwoOverlappingApprovalsWins() throws Exception {
+		when(currentUser.get()).thenReturn(new CurrentUser("U01", "Maya Brooks", Role.SCHEDULER, Set.of("CS", "MATH")));
 		String tag = UUID.randomUUID().toString().substring(0, 8);
 		// the approver's profile row is created up front so the two threads do not race to insert it
 		users.findById("U01").orElseGet(() -> users.save(new AppUserEntity("U01", "Maya Brooks", null, null)));

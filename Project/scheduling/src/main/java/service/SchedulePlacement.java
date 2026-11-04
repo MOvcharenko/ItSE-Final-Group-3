@@ -6,8 +6,7 @@ import java.util.List;
 
 /**
  * How a ready-made schedule row gets into the DRAFT timetable (FR3.4, FR3.7, UC-12 step 6 and 8).
- * OWNER: Dev A (TimetableService can implement this). Until a bean exists, ImportServiceImpl marks every
- * schedule row "Needs review" instead of failing.
+ * Implemented by {@link ImportedSchedulePlacement}.
  *
  * Contract, one call = one section:
  *  - runs in its OWN transaction and must not depend on an outer one (a bad row must not undo the good ones);
