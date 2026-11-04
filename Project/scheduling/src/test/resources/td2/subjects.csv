@@ -1,0 +1,4 @@
+subject_code,title,credit_hours,default_room_type,equipment_needed
+HIST 120,World History,3,Lecture hall,(leave blank if none)
+HIST 210,Medieval Europe,3,Seminar room,Projector
+CHEM 101,General Chemistry,4,Lab,Lab benches; Document camera

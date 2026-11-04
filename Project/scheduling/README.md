@@ -34,8 +34,8 @@ The dev profile uses in-memory H2 in PostgreSQL mode, with the console at `/h2-c
 | Package | Layer | Rule |
 |---|---|---|
 | `api` | presentation | controllers + request DTOs (`api.dto`, validated, plain-language messages); every method has `@PreAuthorize`; errors are ProblemDetail via `api.error.ApiExceptionHandler` |
-| `service` | service | transactions and department checks; return `service.view` records, never entities; throw `NotFoundException` / `ConflictingStateException` / `BusinessRuleException` |
-| `core` | business rules | **no Spring or JPA imports** |
+| `service` | service | transactions, role and department checks, `Caller` (the one class that reads `CurrentUserProvider`); `*ServiceImpl` classes; returns `service.view` records, never entities; throws `NotFoundException` / `ConflictingStateException` (incl. `BookingCollisionException`) / `BusinessRuleException` |
+| `core` | business rules | **no Spring or JPA imports**; `core.importing` holds the CSV parser and the row rules for imports |
 | `persistence` | data access | JPA entities + repositories; schema only via Flyway (`src/main/resources/db/migration`) |
 | `integration` | external | `SisClient` + stub; failures degrade |
 | `security` | security | JWT config, `CurrentUserProvider` |
@@ -48,20 +48,20 @@ Spring tests outside the `app` package must name the application class, e.g. `@C
 
 Test names carry the TC-ID they cover, e.g. `@DisplayName("TC-FR4.3c: ...")`.
 
-## Cross-stream contracts (Day 1 stubs)
+## Cross-stream contracts
 
-| Interface | Owner | Day-1 stub |
+| Interface | Owner | State |
 |---|---|---|
-| `security.CurrentUserProvider` | A | Done: `JwtCurrentUserProvider`, role from the token, departments from `scheduler_department` |
-| `service.NoticeService` | A | Done: `PersistentNoticeService`. Takes text **ids** and saves in the caller's transaction, except students' notices, which follow after the commit. Dev B's Reassign: call `notifyAffected(sectionId, INSTRUCTOR_REASSIGNED)` and `notifyRemovedInstructors`. Dev C's booking decisions: call `notifyRequester(bookingId, event)`, after `markCancelled` so the note is included |
-| `service.ConflictService` | B | `NoOpConflictService` finds nothing, so publishing never asks for confirmation until B replaces it |
-| `service.TimetableService` | A | Done. Import: call `placeSection(termId, SectionPlacement)`; it applies the same rules as the API and throws `BusinessRuleException` with the reason |
-| `integration.SisClient` | B | `StubSisClient` enrolls Jordan Ellis (`U03`) in every section. Has `enrolledStudentIds` and `enrolledSectionIds`; B adds the enrollment count and shared students |
-| `service.CatalogService` | C | interface only; implementation to follow |
-| `service.BookingService` | C | interface only; implementation to follow |
-| `service.ImportService` | C | interface only; implementation to follow |
+| `security.CurrentUserProvider` | A | `get()` returns a `CurrentUser` record (`id`, `displayName`, `role`, `departments`, with `isScheduler()` and `canManage(department)`). Day-1 stub: `StubCurrentUserProvider` |
+| `service.NoticeService` | A | takes ids. Booking decisions call `notifyRequester(bookingId, event)` inside their own transaction |
+| `service.TimetableOccupancy` | A | **to implement.** Which rooms and equipment units the timetable uses in a time window. Until a bean exists, availability search ignores the timetable |
+| `service.SchedulePlacement` | A | **to implement.** Places one imported schedule row in the Draft timetable and runs conflict detection. Until a bean exists, every schedule row is "Needs review" |
+| `ConflictService.recheck` | B | to be added. Not yet called from booking approval |
+| `SisClient` | B | to be added |
+| `CatalogService`, `BookingService`, `ImportService` | C | implemented (`*ServiceImpl`) |
 
-Service implementations take the caller from `CurrentUserProvider`, never from method arguments (NFR1.3, NFR1.4).
+Service implementations take the caller from `CurrentUserProvider` (through `Caller`), never from method arguments (NFR1.3, NFR1.4).
+`TimetableOccupancy` and `SchedulePlacement` are looked up with `ObjectProvider`, so the app starts without them.
 
 ## Signing in
 
@@ -149,6 +149,64 @@ Instructors' notices save with the change. Students' notices follow moments late
 | Student | Sections they are enrolled in according to the SIS, in Published terms |
 
 A blank parameter means no filter, so a form can send its unset fields. Filters only narrow this, so they can never show someone more than their role allows. If the SIS is down, a student gets an empty list with `enrollmentAvailable: false`; the UI should say that enrollment could not be loaded, not that there are no classes.
+
+## Catalog, booking and import: how it works
+
+### Who may do what
+
+| | Scheduler | Instructor | Student |
+|---|---|---|---|
+| Subjects: read, add | yes | no | no |
+| Rooms and equipment: read | yes | yes | no |
+| Rooms and equipment: add, change status | yes | no | no |
+| Request a room or equipment | yes | yes | no |
+| See the booking queue | everything | only their own requests | no |
+| Approve or cancel a booking | yes | no | no |
+| Search availability | yes | yes | no |
+| Import a CSV, download a template | yes | no | no |
+
+The controllers check this with `@PreAuthorize`, and every service method checks it again. A subject's department must be one the Scheduler may manage (`CurrentUser.canManage`). What the user types is first matched to the spelling in their authorized list, so `math` is stored as `MATH`.
+
+### Bookings
+
+A request goes through three states: `PENDING`, then `APPROVED` or `CANCELLED`. Only `APPROVED` bookings reserve a resource.
+
+1. A room or equipment item can be requested only when its status is Available. A booking holds exactly one resource.
+2. **Approving** takes a row lock on the room (or equipment item) first, then re-reads the booking, then counts overlapping approved bookings, all in one transaction. Two approvals for the same room therefore run one after the other, and the second gets `BookingCollisionException` (HTTP 409). A room holds one booking at a time. Equipment conflicts only when **all** its units are taken.
+3. Two windows overlap only if each starts before the other ends. A booking that ends at 17:00 does not block one that starts at 17:00.
+4. **Cancelling** also takes the lock, so it cannot cross with an approval of the same booking. It works on pending and approved bookings.
+5. The requester gets a notice in the same transaction: `BOOKING_APPROVED`, `BOOKING_DECLINED` (a pending request was turned down) or `BOOKING_CANCELLED` (an approved booking was withdrawn). A Scheduler who decides their own request gets no notice.
+
+### Availability search
+
+Search offers a room only when all of these hold: it is Available (Maintenance and Checked out are hidden), it has no approved booking in the window, and the timetable does not use it (`TimetableOccupancy`). Optional filters are minimum capacity, room type and fixed equipment. Equipment search shows the **free units**: total, minus approved bookings, minus what sections need.
+
+### Import
+
+`POST /api/import/{type}` with a CSV file in the multipart field `file`. The type is `rooms`, `equipment`, `subject-list` or `ready-made-schedule`.
+
+- **The header is checked first.** It must match the template: same columns, same order, capitals and spaces ignored. A wrong header, an empty file or broken quoting rejects the **whole file** with HTTP 422 and records nothing.
+- **Every other row is judged on its own.** The answer is HTTP 200 with a list of rows, each `ADDED` or `NEEDS_REVIEW` with a plain-language reason. Good rows stay even if others fail. Each row is saved in its own transaction. The whole upload is recorded as a batch with its rows.
+- **File rules:**
+  - A value that contains a comma must be wrapped in double quotes: `"AV Storage, Hale Hall"`. Otherwise the row gets an extra column and fails.
+  - Several items in one cell (room equipment, subject equipment, co-instructors) are separated by `;`.
+  - Days are `M`, `T`, `W`, `Th`, `F`, written together (`MWF`, `TTh`). Times are 24-hour (`13:00`).
+  - Room type is `Lecture hall`, `Lab` or `Seminar room`.
+  - The template's example text `(leave blank if none)` counts as empty.
+  - Excel's UTF-8 byte-order mark is removed. Uploads over Spring's 1 MB multipart limit fail; raise `spring.servlet.multipart.max-file-size` if you need more.
+- **Names are matched ignoring case and spacing** (`core.importing.Keys`), so `Fall2026` finds the term "Fall 2026" and `founders110` finds "Founders 110". The stored value keeps its original spelling.
+- **Schedule rows** (`ready-made-schedule`) need the subject to be in the catalog already (import the subject list first). The room must exist (otherwise the reason is `room not recognized`), and each instructor must match exactly one person by display name. The row is then handed to `SchedulePlacement` (Dev A), which finds the term, places the section and checks conflicts at once. A subject that already has a placed section in that term is a duplicate (reason starts with "Duplicate subject code").
+- **Templates.** `GET /api/import/templates/{type}` returns the header line. The columns are defined in one place, `core.importing.ImportColumns`. `ImportTemplatesTest` should keep the files in `import-templates/` in step with it.
+
+### How errors reach the client
+
+| HTTP | Thrown | Example |
+|---|---|---|
+| 400 | bean validation | field messages in the `errors` property |
+| 403 | `AccessDeniedException` | a Student calls an endpoint, or a Scheduler adds a subject to another department |
+| 404 | `NotFoundException` | unknown room or booking id |
+| 409 | `ConflictingStateException`, `BookingCollisionException` | approving a booking that is already approved |
+| 422 | `BusinessRuleException` | capacity below 1, end before start, wrong import header |
 
 ### Calendar export
 
@@ -300,11 +358,58 @@ Two windows overlap only when each starts before the other ends. A booking that 
 3. Add the class to `EntityMappingTest.entities()`.
 4. Run `./mvnw verify`. The mapping test names any wrong column, missing NOT NULL, text that is too long, enum mismatch, or required column that nothing fills.
 
-### Tests
+## Tests
+
+`./mvnw verify` runs everything. Names ending `Test` are unit tests, names ending `IT` are integration tests. Test names carry the case id they cover, e.g. `@DisplayName("TC-FR2.3b: ...")`.
 
 | Test | What it checks | Needs Spring? |
 |---|---|---|
-| `EntityMappingTest` | Applies the migrations to H2 and compares every entity with the real tables | No |
-| `PersistenceIT` | Repository queries, the row lock, the overlap boundary, the queue fetch, import rows | Yes |
+| `core.importing.*Test` | CSV parsing, header check, row rules, day and time codes | no |
+| `service.*ServiceImplTest` | role checks, validation, approval order (lock, refresh, check), notices, import outcomes. Repositories and `NoticeService` are Mockito mocks | no |
+| `persistence.EntityMappingTest` | every entity against the real tables (names, NOT NULL, lengths, enum values) | no |
+| `support.Td1LoaderTest`, `support.Td2FilesTest` | the data set itself (see below) | no |
+| `persistence.PersistenceIT` | repository queries, the row lock, the overlap boundary, the queue fetch | yes |
+| `service.BookingConcurrencyIT` | two Schedulers approve overlapping bookings at once: exactly one wins | yes (not `@Transactional`) |
+
+- The tests that need no Spring run in seconds. Keep them that way: put rules in `core` or in a service, not in a controller.
+- `PersistenceIT` and `BookingConcurrencyIT` start the whole application. If the context cannot start yet (for example the JWT security config is missing), use a `@DataJpaTest` slice for `PersistenceIT` (its package changed in Spring Boot 4, so use your IDE's import). `BookingConcurrencyIT` calls the service from two threads, so the current-user provider must work from any thread.
+- Service tests build their caller with `TestUsers`. If `CurrentUser` changes shape, adapt `Caller` and `TestUsers` only.
+- `Td1LoaderTest` and `Td2FilesTest` use `support.TestDatabase`, which applies the real migrations to a throw-away database. They run on H2 by default. Add `-Dtd1.jdbc.url=jdbc:postgresql://host/db -Dtd1.jdbc.user=... -Dtd1.jdbc.password=...` to run them on PostgreSQL instead (the `public` schema is wiped first).
+
+### Test data: TD-1 and TD-2
+
+`support.Td1Loader` puts the database into the known state the test plan asks for (TP3). It is plain SQL on the V1 tables, so it needs no entities and no Spring.
+
+```java
+// a @Transactional test: join the test's transaction, everything rolls back afterwards
+Td1Loader.resetAndLoad(DataSourceUtils.getConnection(dataSource));
+
+// a test that is not transactional (e.g. a concurrency test): commits by itself
+Td1Loader.resetAndLoad(dataSource);
+```
+
+- `reset` empties **every** application table in foreign-key order. When a migration adds a table, add it to `Td1Loader.TABLES_CHILD_FIRST`; `Td1LoaderTest` fails until you do.
+- `support.Td1` holds the ids (`Td1.MATH_210`, `Td1.CARTER_CENTER_301`, ...) and `Td1.ENROLLED`, the enrollment numbers that the SIS stub must return. Enrollment is not stored in the database.
+- Conflicts are **detected**, never pre-loaded.
+
+What TD-1 contains: term Fall 2026 (Draft), 7 sections, 5 rooms, 4 equipment types (two laptop carts), the TP3 accounts, instructor availability, and two past bookings. It has exactly three known conflicts:
+
+| Conflict | Data |
+|---|---|
+| Room double-booking | CS 340 and ART 220, Innovation Lab B, Monday 13:00-14:15 (TC-FR4.3a) |
+| Instructor unavailable | CS 340 while Dr. Novak is unavailable Monday 12:00-14:00 (TC-FR4.3c) |
+| Capacity exceeded | ENG 101 in Carter Center 301 (seats 80, the SIS stub reports 92) (TC-FR4.3e) |
+
+Other facts the tests rely on: MATH 210 and PHYS 110 overlap on Tuesday in different rooms with different instructors (TC-FR4.3f); instructor load is Bianchi 6 of 18 hours, Novak 2 of 8, Alvarez 9 of 10 (TC-FR5.1); Founders 110 is underused, Hale Hall 204 oversized and Innovation Lab B well used (TC-FR5.2). Maya Brooks manages every department the test steps touch, not just CS and MATH.
+
+TD-2 is in `src/test/resources/td2/`: the four filled templates, `schedule-lab-b-monday.csv` (TC-FR3.7) and `schedule-faulty.csv` (TC-FR3.6: one valid row, a duplicate subject code, a missing field, an unknown room). The test plan runs the imports in order: `subjects.csv` first, so that `schedule.csv` can place its subjects.
+
+## Not wired yet
+
+- Booking approval does not call `ConflictService.recheck` yet (Dev B).
+- Availability search ignores the timetable until Dev A provides `TimetableOccupancy`.
+- Schedule import marks every row "Needs review" until Dev A provides `SchedulePlacement`.
+- A lock timeout during approval is not mapped to a friendly 409 yet: add a handler for `PessimisticLockingFailureException` in `ApiExceptionHandler`.
+- Controller tests (`@WebMvcTest` with roles) wait for the JWT security configuration (Dev A).
 
 Spring needs to find the entities and repositories in `persistence`. `SchedulingApplication` lives in `app`, so it must contain `@EntityScan(basePackages = "persistence")` and `@EnableJpaRepositories(basePackages = "persistence")`. Check the `@EntityScan` import with your IDE, because Spring Boot 4 moved it.

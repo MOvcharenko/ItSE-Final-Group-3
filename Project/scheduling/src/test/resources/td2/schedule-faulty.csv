@@ -1,0 +1,5 @@
+subject_code,title,days,start_time,end_time,room,instructor,term
+CHEM 101,General Chemistry,W,15:00,17:00,Sci Building 02,Dr. Patel,Fall2026
+CS 340,Database Systems,F,10:00,11:15,Founders 110,Dr. Novak,Fall2026
+HIST 210,,TTh,14:00,15:15,Founders 110,Dr. Patel,Fall2026
+PSY 330,Social Psychology,M,09:00,10:15,Basement Closet,Dr. Patel,Fall2026

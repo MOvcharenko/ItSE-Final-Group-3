@@ -6,7 +6,8 @@ import java.util.List;
 
 /**
  * How a ready-made schedule row gets into the DRAFT timetable (FR3.4, FR3.7, UC-12 step 6 and 8).
- * Implemented by {@link ImportedSchedulePlacement}.
+ * OWNER: Dev A (TimetableService can implement this). Until a bean exists, ImportServiceImpl marks every
+ * schedule row "Needs review" instead of failing.
  *
  * Contract, one call = one section:
  *  - runs in its OWN transaction and must not depend on an outer one (a bad row must not undo the good ones);
@@ -14,6 +15,8 @@ import java.util.List;
  *    "Fall 2026"), and requires it to be in Draft and the caller to be authorized for the subject's department;
  *  - creates the section with one weekly meeting per day, the room and the instructors;
  *  - runs conflict detection straight away, exactly as for a section placed by hand (FR3.7);
+ *  - a subject that ALREADY has a placed section in that term is a duplicate (UC-12 6a): throw
+ *    BusinessRuleException whose message starts with "Duplicate subject code" (TD-2 faulty file: CS 340);
  *  - on any problem throws BusinessRuleException with a plain-language reason; that reason becomes the row's
  *    "Needs review" text (e.g. "term 'Fall2027' not found", "term is already Published").
  */
