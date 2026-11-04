@@ -402,7 +402,7 @@ class NoticeApiIT {
 		List<NoticeEntity> stored = noticeRepository.findByRecipientIdOrderByCreatedAtDesc(requester);
 		assertThat(stored).extracting(NoticeEntity::getMessage).containsExactlyInAnyOrder(
 				"Your request for " + when + " was approved.",
-				"Your request for " + when + " was declined.",
+				"Your request for " + when + " was declined. Note: Room closed",
 				"Your booking of " + when + " was cancelled. Note: Room closed");
 		assertThat(stored).allSatisfy(notice -> {
 			assertThat(notice.getSectionId()).isNull();

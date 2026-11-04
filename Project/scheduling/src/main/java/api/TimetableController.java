@@ -39,6 +39,13 @@ public class TimetableController {
 		this.timetable = timetable;
 	}
 
+	/** Who can be chosen when placing a section. */
+	@GetMapping("/instructors")
+	@PreAuthorize("hasRole('SCHEDULER')")
+	public List<SectionView.InstructorView> listInstructors() {
+		return timetable.listInstructors();
+	}
+
 	// ---- Terms ----
 
 	@GetMapping("/terms")

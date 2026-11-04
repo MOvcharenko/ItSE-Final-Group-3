@@ -119,7 +119,8 @@ public class PersistentNoticeService implements NoticeService {
 		String resource = booking.resourceName();
 		return switch (event) {
 			case BOOKING_APPROVED -> NoticeMessages.bookingApproved(resource, booking.getStartTime(), booking.getEndTime());
-			case BOOKING_DECLINED -> NoticeMessages.bookingDeclined(resource, booking.getStartTime(), booking.getEndTime());
+			case BOOKING_DECLINED -> NoticeMessages.bookingDeclined(resource, booking.getStartTime(), booking.getEndTime(),
+					booking.getCancelNote());
 			case BOOKING_CANCELLED -> NoticeMessages.bookingCancelled(resource, booking.getStartTime(), booking.getEndTime(),
 					booking.getCancelNote());
 			default -> throw new IllegalArgumentException(event + " is not a booking event.");

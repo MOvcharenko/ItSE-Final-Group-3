@@ -25,7 +25,7 @@ curl.exe http://localhost:8080/actuator/health
 
 You should see `"status":"UP"`.
 
-- **There are no web pages yet.** Opening `http://localhost:8080/` in a browser gives a 401 error, which is normal. Use the API commands below.
+- **To use the web UI,** open `http://localhost:8080/` in a browser and sign in as Maya Brooks, the Scheduler. The app starts empty: add subjects and rooms under **Catalog**, then a term and its sections under **Timetable**, and publish the term so that the other accounts can see it.
 - **The database is in memory.** Restarting the app deletes all data, and old tokens stop working, so get a new one.
 
 ## Sign in
@@ -116,7 +116,9 @@ Or leave it running and start the app on another port, then use that port in `$b
 .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=dev' '-Dspring-boot.run.arguments=--server.port=8081'
 ```
 
-**Every URL gives 404, even `/actuator/health`:** that's probably a different program on that port. Our app answers 401 for anything without a token, and our health check needs no token.
+**Every URL gives 404, even `/actuator/health`:** that's probably a different program on that port. Our app answers 401 for anything without a token, except the web UI's files and the health check.
+
+**`http://localhost:8080/` gives a 401:** the app was started before the web UI was added. Restart it.
 
 **`Set spring.security.oauth2.resourceserver.jwt.issuer-uri`:** you started the app without the `dev` profile. Add it as shown in [Start the app](#start-the-app).
 
@@ -197,4 +199,4 @@ Not working yet: publishing never warns about conflicts, because Dev B's conflic
 
 Check it's running: open http://localhost:8081/actuator/health in your browser. It should show "status":"UP".
 
-A browser can't do much more than that yet. Opening http://localhost:8081/ gives a 401 error, which is normal because there are no web pages and the app needs a token. The only other page that works is the database viewer, at http://localhost:8081/h2-console.
+See it in the browser: open http://localhost:8081/ and pick an account. Everything you built above appears there, and the Scheduler can also add to it. For this data, choose Fall 2030 if it isn't already selected. The database viewer is at http://localhost:8081/h2-console.

@@ -95,6 +95,7 @@ class SecurityMatrixIT {
 			new Endpoint("GET", "/api/search/equipment", WINDOW, null, 200, STAFF),
 			new Endpoint("GET", "/api/import/templates/{type}", "", null, 200, SCHEDULER),
 			new Endpoint("POST", "/api/import/{type}", "", null, 200, SCHEDULER),
+			new Endpoint("GET", "/api/instructors", "", null, 200, SCHEDULER),
 			new Endpoint("GET", "/api/terms", "", null, 200, EVERYONE),
 			new Endpoint("GET", "/api/terms/{id}", "", null, 200, EVERYONE),
 			new Endpoint("POST", "/api/terms", "", TERM, 201, SCHEDULER),

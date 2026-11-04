@@ -76,12 +76,15 @@ public final class NoticeMessages {
 		return "Your request for " + resource + " on " + window(start, end) + " was approved.";
 	}
 
-	public static String bookingDeclined(String resource, LocalDateTime start, LocalDateTime end) {
-		return "Your request for " + resource + " on " + window(start, end) + " was declined.";
+	public static String bookingDeclined(String resource, LocalDateTime start, LocalDateTime end, String note) {
+		return withNote("Your request for " + resource + " on " + window(start, end) + " was declined.", note);
 	}
 
 	public static String bookingCancelled(String resource, LocalDateTime start, LocalDateTime end, String note) {
-		String message = "Your booking of " + resource + " on " + window(start, end) + " was cancelled.";
+		return withNote("Your booking of " + resource + " on " + window(start, end) + " was cancelled.", note);
+	}
+
+	private static String withNote(String message, String note) {
 		return note == null || note.isBlank() ? message : message + " Note: " + note;
 	}
 

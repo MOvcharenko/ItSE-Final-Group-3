@@ -92,8 +92,20 @@ class NoticeMessagesTest {
 	@DisplayName("UC-08: a booking across days shows both dates")
 	void bookingAcrossDays() {
 		assertThat(NoticeMessages.bookingDeclined("Projector 1", LocalDateTime.of(2026, 11, 10, 17, 0),
-				LocalDateTime.of(2026, 11, 11, 9, 0)))
+				LocalDateTime.of(2026, 11, 11, 9, 0), null))
 			.isEqualTo("Your request for Projector 1 on Nov 10, 17:00 to Nov 11, 09:00 was declined.");
+	}
+
+	@Test
+	@DisplayName("UC-08: a declined request includes the Scheduler's note only when there is one")
+	void bookingDeclined() {
+		LocalDateTime start = LocalDateTime.of(2026, 11, 10, 17, 0);
+		LocalDateTime end = LocalDateTime.of(2026, 11, 10, 18, 0);
+
+		assertThat(NoticeMessages.bookingDeclined("Founders 110", start, end, "Room closed"))
+			.endsWith("was declined. Note: Room closed");
+		assertThat(NoticeMessages.bookingDeclined("Founders 110", start, end, " ")).endsWith("was declined.");
+		assertThat(NoticeMessages.bookingDeclined("Founders 110", start, end, null)).endsWith("was declined.");
 	}
 
 	@Test

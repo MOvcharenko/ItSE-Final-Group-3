@@ -699,6 +699,14 @@ class TimetableApiIT {
 		return mvc.perform(request);
 	}
 
+	@Test
+	@DisplayName("A Scheduler can list who may be chosen as an instructor")
+	void listsInstructors() throws Exception {
+		mvc.perform(get("/api/instructors").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor(SCHEDULER)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[?(@.id == '" + BIANCHI + "')].name").value("L. Bianchi"));
+	}
+
 	private String tokenFor(String userId) throws Exception {
 		String body = mvc.perform(post("/dev/token").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"userId\":\"" + userId + "\"}"))

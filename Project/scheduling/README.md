@@ -27,7 +27,31 @@ cd Project/scheduling
 ```
 
 The dev profile uses in-memory H2 in PostgreSQL mode, with the console at `/h2-console`.
-`GET /actuator/health` is open; everything else needs a JWT (see Signing in below).
+`GET /actuator/health` and the web UI's own files are open; everything else needs a JWT (see Signing in below).
+
+## Web UI
+
+Open `http://localhost:8080/` with the dev profile running and pick a test account. The pages are plain HTML, CSS and JavaScript modules in `src/main/resources/static`, with no build step or framework. `Project/UI Mockup/` is the design reference.
+
+| File | What it does |
+|---|---|
+| `js/app.js` | Sign-in, sidebar and top bar. The `SCREENS` list decides which role sees which screen, so a new screen goes there |
+| `js/api.js` | All calls to the API: adds the token, turns errors into plain-language messages, and returns to sign-in on a 401 |
+| `js/dom.js` | `el()` builds elements. Text from the API always goes in as text, so don't use `innerHTML` with it |
+| `js/dates.js` | Date and time formats. Dates are local text such as `2026-11-04`, so avoid `toISOString`, which can shift the day |
+| `js/forms.js` | Labelled fields and `openForm()`, the pop-up form that keeps what was typed and shows the API's message if a save fails |
+| `js/calendar.js`, `js/notices.js` | The calendar screen (Day, Week, Term, filters, `.ics` export) and its notices panel. The sidebar shows the unread count on every screen and checks it each minute |
+| `js/timetable.js` | Schedulers: create, rename, copy, publish and delete terms; add, edit and remove sections |
+| `js/catalog.js` | Schedulers: add subjects, rooms and equipment, and change a room's or item's status |
+| `js/import.js` | The "Import from file" panel on the Catalog screen: template download, upload and row-by-row results |
+| `js/bookings.js` | Schedulers and Instructors: request a room or equipment, and see the requests, filtered by status. Schedulers also approve, decline and cancel them |
+| `js/search.js` | The "Search availability" panel on the Bookings screen, for rooms and equipment |
+
+- **Done:** sign-in with test accounts, the calendar and notices for all three roles, the Scheduler's Timetable and Catalog screens, booking requests and decisions, availability search, and import.- **Waiting on the API:** conflicts, insights and instructor availability have no endpoints yet.
+- **Waiting on the Core Platform:** real sign-in. Until then, the sign-in page only works in the dev profile.
+- **Instructor calendar filter:** not offered yet, because calendar events give instructor names and the filter needs user ids.
+
+The token and the term last chosen are kept in `sessionStorage`, so they end with the browser tab, and each tab can use a different account. Signing out clears both. The role read from the token only chooses what to show; the API still checks every request.
 
 ## Packages (top level, directly under `src/main/java`)
 
@@ -90,6 +114,7 @@ Any other profile refuses to start unless `spring.security.oauth2.resourceserver
 
 | Method and path | Roles | Notes |
 |---|---|---|
+| `GET /api/instructors` | Scheduler | Everyone a section can name as an instructor, as `{"id","name"}`. Roles are not stored, so staff who don't teach are listed too |
 | `GET /api/terms`, `GET /api/terms/{id}` | All | Students see only published terms; a Draft answers 404 for them |
 | `POST /api/terms` | Scheduler | 201; always starts as a Draft |
 | `PATCH /api/terms/{id}` | Scheduler | body `{"name":"..."}`; rename |

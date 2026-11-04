@@ -77,6 +77,21 @@ public class TimetableService {
 		this.clock = clock;
 	}
 
+	/**
+	 * Everyone a section can name as an instructor, which is the same check as {@link #checkedInstructors}. Roles come
+	 * only from tokens and are not stored, so staff who don't teach are listed too.
+	 */
+	@Transactional(readOnly = true)
+	public List<SectionView.InstructorView> listInstructors() {
+		if (!currentUser.get().isScheduler()) {
+			throw new AccessDeniedException("Only Schedulers can list instructors.");
+		}
+		return users.findAll().stream()
+				.map(user -> new SectionView.InstructorView(user.getId(), user.getDisplayName()))
+				.sorted(Comparator.comparing(SectionView.InstructorView::name))
+				.toList();
+	}
+
 	// ---- Terms ----
 
 	/** Students only see published terms. Instructors also see drafts, because they submit availability for them. */
