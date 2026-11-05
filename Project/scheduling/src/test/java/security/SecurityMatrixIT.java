@@ -43,6 +43,7 @@ import persistence.AppUserRepository;
 import service.BookingService;
 import service.CalendarService;
 import service.CatalogService;
+import service.ConflictService;
 import service.ImportService;
 import service.NoticeService;
 import service.TimetableService;
@@ -77,6 +78,8 @@ class SecurityMatrixIT {
 			{"name":"Fall 2026","startDate":"2026-09-01","endDate":"2026-12-20"}""";
 	private static final String TERM_NAME = """
 			{"name":"Fall 2026"}""";
+	private static final String DISMISS = """
+			{"reason":"Accepted scheduling clash"}""";
 
 	private static final List<Endpoint> ENDPOINTS = List.of(
 			new Endpoint("GET", "/api/subjects", "", null, 200, SCHEDULER),
@@ -111,7 +114,11 @@ class SecurityMatrixIT {
 			new Endpoint("GET", "/api/notices", "", null, 200, EVERYONE),
 			new Endpoint("POST", "/api/notices/{id}/read", "", null, 200, EVERYONE),
 			new Endpoint("GET", "/api/calendar", "", null, 200, EVERYONE),
-			new Endpoint("GET", "/api/calendar.ics", "", null, 200, EVERYONE));
+			new Endpoint("GET", "/api/calendar.ics", "", null, 200, EVERYONE),
+			new Endpoint("GET", "/api/terms/{id}/conflicts", "", null, 200, SCHEDULER),
+			new Endpoint("POST", "/api/terms/{id}/rescan", "", null, 200, SCHEDULER),
+			new Endpoint("POST", "/api/conflicts/{id}/reassign", "", "{}", 200, SCHEDULER),
+			new Endpoint("POST", "/api/conflicts/{id}/dismiss", "", DISMISS, 200, SCHEDULER));
 
 	@Autowired
 	MockMvc mvc;
@@ -137,6 +144,9 @@ class SecurityMatrixIT {
 
 	@MockitoBean
 	NoticeService notices;
+
+	@MockitoBean
+	ConflictService conflicts;
 
 	@MockitoBean
 	CalendarService calendar;
