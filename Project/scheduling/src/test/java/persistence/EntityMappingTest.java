@@ -63,7 +63,8 @@ class EntityMappingTest {
 		return Stream.of(AppUserEntity.class, RoomEntity.class, EquipmentEntity.class, SubjectEntity.class,
 				BookingEntity.class, ImportBatchEntity.class, TermEntity.class, SectionEntity.class,
 				NoticeEntity.class, ConflictEntity.class, AuditLogEntryEntity.class,
-				InstructorAvailabilityEntity.class);
+				InstructorAvailabilityEntity.class, AvailabilitySubmissionEntity.class,
+				InstructorEquipmentNeedEntity.class);
 	}
 
 	@BeforeAll

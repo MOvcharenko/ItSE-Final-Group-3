@@ -40,6 +40,7 @@ import com.jayway.jsonpath.JsonPath;
 import app.SchedulingApplication;
 import domain.Role;
 import persistence.AppUserRepository;
+import service.AvailabilityService;
 import service.BookingService;
 import service.CalendarService;
 import service.CatalogService;
@@ -59,6 +60,7 @@ import service.TimetableService;
 class SecurityMatrixIT {
 
 	private static final Set<Role> SCHEDULER = Set.of(Role.SCHEDULER);
+	private static final Set<Role> INSTRUCTOR = Set.of(Role.INSTRUCTOR);
 	private static final Set<Role> STAFF = Set.of(Role.SCHEDULER, Role.INSTRUCTOR);
 	private static final Set<Role> EVERYONE = Set.of(Role.values());
 
@@ -120,7 +122,10 @@ class SecurityMatrixIT {
 			new Endpoint("GET", "/api/terms/{id}/dismissals", "", null, 200, SCHEDULER),
 			new Endpoint("POST", "/api/terms/{id}/rescan", "", null, 200, SCHEDULER),
 			new Endpoint("POST", "/api/conflicts/{id}/reassign", "", "{}", 200, SCHEDULER),
-			new Endpoint("POST", "/api/conflicts/{id}/dismiss", "", DISMISS, 200, SCHEDULER));
+			new Endpoint("POST", "/api/conflicts/{id}/dismiss", "", DISMISS, 200, SCHEDULER),
+			new Endpoint("GET", "/api/terms/{id}/availability/me", "", null, 200, INSTRUCTOR),
+			new Endpoint("PUT", "/api/terms/{id}/availability/me", "", "{\"blocks\":[]}", 200, INSTRUCTOR),
+			new Endpoint("GET", "/api/instructors/{id}/availability", "?termId=X1", null, 200, STAFF));
 
 	@Autowired
 	MockMvc mvc;
@@ -149,6 +154,9 @@ class SecurityMatrixIT {
 
 	@MockitoBean
 	ConflictService conflicts;
+
+	@MockitoBean
+	AvailabilityService availability;
 
 	@MockitoBean
 	CalendarService calendar;

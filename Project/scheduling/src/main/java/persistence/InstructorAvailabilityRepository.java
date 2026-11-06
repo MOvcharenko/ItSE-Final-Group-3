@@ -23,5 +23,7 @@ public interface InstructorAvailabilityRepository extends JpaRepository<Instruct
 	List<InstructorAvailabilityEntity> findByTermAndInstructor(@Param("termId") String termId,
 			@Param("instructorId") String instructorId);
 
-	void deleteByTerm_IdAndInstructor_Id(String termId, String instructorId);
+	@org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
+	@Query("delete from InstructorAvailabilityEntity a where a.term.id = :termId and a.instructor.id = :instructorId")
+	void deleteByTerm_IdAndInstructor_Id(@Param("termId") String termId, @Param("instructorId") String instructorId);
 }
