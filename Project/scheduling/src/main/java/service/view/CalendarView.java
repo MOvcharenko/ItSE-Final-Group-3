@@ -15,9 +15,10 @@ import domain.TermStatus;
 public record CalendarView(CalendarScope scope, LocalDate from, LocalDate to, boolean enrollmentAvailable,
 		List<Event> events) {
 
-	/** One meeting on one date. Weekly meetings appear once per date. */
-	public record Event(String sectionId, String courseCode, String sectionNumber, MeetingPattern pattern, LocalDate date,
-			LocalTime start, LocalTime end, String roomId, String roomName, String building, List<String> instructors,
-			String termId, String termName, TermStatus termStatus) {
+	/** One meeting on one date. Weekly meetings appear once per date. Instructors are sorted by name. */
+	public record Event(String sectionId, String courseCode, String courseTitle, String sectionNumber,
+			MeetingPattern pattern, LocalDate date,
+			LocalTime start, LocalTime end, String roomId, String roomName, String building,
+			List<SectionView.InstructorView> instructors, String termId, String termName, TermStatus termStatus) {
 	}
 }

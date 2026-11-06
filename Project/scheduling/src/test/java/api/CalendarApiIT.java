@@ -141,11 +141,13 @@ class CalendarApiIT {
 			.andExpect(jsonPath("$.to").value("2031-09-03"))
 			.andExpect(jsonPath("$.events.length()").value(1))
 			.andExpect(jsonPath("$.events[0].courseCode").value(courseA))
+			.andExpect(jsonPath("$.events[0].courseTitle").value("A course"))
 			.andExpect(jsonPath("$.events[0].date").value("2031-09-03"))
 			.andExpect(jsonPath("$.events[0].start").value(startsWith("10:00")))
 			.andExpect(jsonPath("$.events[0].roomId").value(roomA))
 			.andExpect(jsonPath("$.events[0].building").value(buildingA))
-			.andExpect(jsonPath("$.events[0].instructors[0]").value("L. Bianchi"))
+			.andExpect(jsonPath("$.events[0].instructors[0].id").value(BIANCHI))
+			.andExpect(jsonPath("$.events[0].instructors[0].name").value("L. Bianchi"))
 			.andExpect(jsonPath("$.events[0].pattern").value("WEEKLY"))
 			.andExpect(jsonPath("$.enrollmentAvailable").value(true));
 	}
@@ -414,7 +416,8 @@ class CalendarApiIT {
 	@DisplayName("A co-instructor sees the section too")
 	void coInstructor() throws Exception {
 		String shared = place(termId, subject(unique("SHARED")), roomA, BIANCHI + "\",\"" + otherInstructor, TUESDAY);
-		publish();
+		// Novak now teaches two Tuesday sections at once, a High conflict, so publishing needs the confirmation (FR4.7).
+		publishAnyway(termId);
 
 		assertThat(sectionsSeen(BIANCHI, "")).contains(shared);
 	}
@@ -457,7 +460,8 @@ class CalendarApiIT {
 		for (int n = 0; n < 60; n++) {
 			place(bigTerm, subject(unique("N")), roomA, n == 0 ? BIANCHI : otherInstructor, TUESDAY);
 		}
-		send(post("/api/terms/" + bigTerm + "/publish"), SCHEDULER, null).andExpect(status().isOk());
+		// 60 sections in one room at one time are High conflicts, so publishing needs the confirmation (FR4.7).
+		publishAnyway(bigTerm);
 		Statistics statistics = entityManagers.unwrap(SessionFactory.class).getStatistics();
 		statistics.setStatisticsEnabled(true);
 		statistics.clear();
@@ -494,7 +498,7 @@ class CalendarApiIT {
 			.contains("SUMMARY:" + courseA + " section 01")
 			.contains("LOCATION:")
 			.contains(buildingA)
-			.contains("DESCRIPTION:Instructors: L. Bianchi\\nTerm: ");
+			.contains("DESCRIPTION:A course\\nInstructors: L. Bianchi\\nTerm: ");
 	}
 
 	@Test
@@ -724,6 +728,10 @@ class CalendarApiIT {
 
 	private void publish() throws Exception {
 		send(post("/api/terms/" + termId + "/publish"), SCHEDULER, null).andExpect(status().isOk());
+	}
+
+	private void publishAnyway(String term) throws Exception {
+		send(post("/api/terms/" + term + "/publish?confirm=true"), SCHEDULER, null).andExpect(status().isOk());
 	}
 
 	private String term() throws Exception {

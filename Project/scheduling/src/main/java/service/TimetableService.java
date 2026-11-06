@@ -17,6 +17,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import core.NoticeMessages;
 import domain.EquipmentNeed;
 import domain.MeetingPattern;
 import domain.MeetingSlot;
@@ -121,13 +122,48 @@ public class TimetableService {
 		return toView(terms.save(TermEntity.create(name, startDate, endDate)));
 	}
 
-	public TermView renameTerm(String termId, String name) {
-		requireEditor();
+	/**
+	 * Renames a term, moves its dates, or both, in one transaction, so a refused date change also leaves the name as it
+	 * was. A null field keeps its value. Only a Draft's dates can move: a Published term is live in students' calendars,
+	 * and there is no notice for a date change. Moving the dates touches every section, so the caller must be
+	 * authorized for all of them, and no one-time meeting or exam may end up outside the term.
+	 */
+	public TermView updateTerm(String termId, String name, LocalDate startDate, LocalDate endDate) {
+		CurrentUser user = requireEditor();
 		TermEntity term = lockedTerm(termId);
-		if (terms.existsByNameIgnoreCaseAndIdNot(name, termId)) {
-			throw nameTaken(name);
+		if (name != null) {
+			String trimmed = name.trim();
+			if (terms.existsByNameIgnoreCaseAndIdNot(trimmed, termId)) {
+				throw nameTaken(trimmed);
+			}
+			term.rename(trimmed);
 		}
-		term.rename(name);
+		LocalDate start = startDate == null ? term.getStartDate() : startDate;
+		LocalDate end = endDate == null ? term.getEndDate() : endDate;
+		if (start.equals(term.getStartDate()) && end.equals(term.getEndDate())) {
+			return toView(term);
+		}
+		if (term.isPublished()) {
+			throw new ConflictingStateException("A published term's dates cannot be changed.");
+		}
+		if (end.isBefore(start)) {
+			throw new BusinessRuleException("The term must end on or after its start date.");
+		}
+		requireAllDepartments(user, termId);
+		List<SectionEntity> inTerm = sections.findForTerm(termId);
+		for (SectionEntity section : inTerm) {
+			for (MeetingSlot meeting : section.getMeetings()) {
+				if (meeting.date() != null && (meeting.date().isBefore(start) || meeting.date().isAfter(end))) {
+					throw new BusinessRuleException(NoticeMessages.sectionLabel(section.getSubject().getCourseCode(),
+							section.getSectionNumber()) + " meets on " + meeting.date()
+							+ ", which would be outside the new dates. Move or remove that meeting first.");
+				}
+			}
+		}
+		term.changeDates(start, end);
+		// Weekly meetings now repeat over different dates, so calendar files must see a new version.
+		inTerm.forEach(SectionEntity::markModified);
+		conflicts.recheck(termId, ConflictService.Ref.term(termId));
 		return toView(term);
 	}
 

@@ -35,6 +35,7 @@ import persistence.TermRepository;
 import security.CurrentUser;
 import security.CurrentUserProvider;
 import service.view.CalendarView;
+import service.view.SectionView;
 
 /**
  * Day, week and term calendars and .ics export (FR6, UC-15, UC-16, UC-17). What a user sees is decided here from the
@@ -52,6 +53,8 @@ public class CalendarService {
 			.thenComparing(CalendarView.Event::start)
 			.thenComparing(CalendarView.Event::courseCode)
 			.thenComparing(CalendarView.Event::sectionNumber);
+	private static final Comparator<SectionView.InstructorView> BY_NAME = Comparator.comparing(
+			SectionView.InstructorView::name, Comparator.nullsLast(Comparator.naturalOrder()));
 
 	private static final Comparator<IcsWriter.Event> BY_FIRST_MEETING = Comparator.comparing(IcsWriter.Event::date)
 			.thenComparing(IcsWriter.Event::start)
@@ -167,7 +170,7 @@ public class CalendarService {
 				section.getId() + "-" + meeting.pattern() + "-" + number + "@academic-scheduling",
 				meeting.pattern() == MeetingPattern.EXAM ? label + " (Exam)" : label,
 				room == null ? null : room.getName() + ", " + room.getBuilding(),
-				"Instructors: " + instructors + "\nTerm: " + term.getName(),
+				section.getSubject().getTitle() + "\nInstructors: " + instructors + "\nTerm: " + term.getName(),
 				firstDate, meeting.start(), meeting.end(), weekly ? term.getEndDate() : null, !term.isPublished(),
 				section.getRevision());
 	}
@@ -206,11 +209,14 @@ public class CalendarService {
 		for (SectionEntity section : shown) {
 			TermEntity term = section.getTerm();
 			RoomEntity room = section.getRoom();
-			List<String> instructors = section.getInstructorIds().stream().map(names::get).sorted().toList();
+			// The id lets a calendar offer an instructor filter, which takes a user id (FR6.2).
+			List<SectionView.InstructorView> instructors = section.getInstructorIds().stream()
+					.map(id -> new SectionView.InstructorView(id, names.get(id)))
+					.sorted(BY_NAME).toList();
 			for (MeetingSlot meeting : section.getMeetings()) {
 				for (LocalDate date : CalendarDates.datesOf(meeting, term.getStartDate(), term.getEndDate(), from, to)) {
 					events.add(new CalendarView.Event(section.getId(), section.getSubject().getCourseCode(),
-							section.getSectionNumber(), meeting.pattern(), date, meeting.start(), meeting.end(),
+							section.getSubject().getTitle(), section.getSectionNumber(), meeting.pattern(), date, meeting.start(), meeting.end(),
 							room == null ? null : room.getId(), room == null ? null : room.getName(),
 							room == null ? null : room.getBuilding(), instructors, term.getId(), term.getName(),
 							term.getStatus()));

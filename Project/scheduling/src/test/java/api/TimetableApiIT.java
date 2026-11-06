@@ -1,6 +1,8 @@
 package api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -161,6 +163,81 @@ class TimetableApiIT {
 		send(patch("/api/terms/" + termId), SCHEDULER, nameJson(name))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.name").value(name));
 		send(patch("/api/terms/" + termId), SCHEDULER, nameJson(name.toUpperCase())).andExpect(status().isOk());
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: a Draft's dates can change, and its sections are re-checked and get a new calendar version")
+	void changeDates() throws Exception {
+		String sectionId = place();
+		int revision = sections.findById(sectionId).orElseThrow().getRevision();
+
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"startDate\":\"2026-08-25\",\"endDate\":\"2026-12-18\"}")
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.startDate").value("2026-08-25"))
+			.andExpect(jsonPath("$.endDate").value("2026-12-18"));
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-19\"}")
+			.andExpect(jsonPath("$.startDate").value("2026-08-25"))
+			.andExpect(jsonPath("$.endDate").value("2026-12-19"));
+
+		verify(conflicts, times(2)).recheck(termId, ConflictService.Ref.term(termId));
+		assertThat(sections.findById(sectionId).orElseThrow().getRevision()).isEqualTo(revision + 2);
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: new dates that end before they start are refused, and the name in the same request is not saved")
+	void changeDatesBackwards() throws Exception {
+		String name = unique("Kept");
+		send(patch("/api/terms/" + termId), SCHEDULER,
+				"{\"name\":\"" + name + "\",\"startDate\":\"2026-12-01\",\"endDate\":\"2026-09-01\"}")
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(jsonPath("$.detail").value("The term must end on or after its start date."));
+
+		send(get("/api/terms/" + termId), SCHEDULER, null)
+			.andExpect(jsonPath("$.name").value(not(name)))
+			.andExpect(jsonPath("$.startDate").value("2026-09-01"));
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: dates that would leave an exam outside the term are refused, naming the section")
+	void changeDatesStrandsExam() throws Exception {
+		send(post("/api/terms/" + termId + "/sections"), SCHEDULER, placement("""
+				[{"pattern":"WEEKLY","day":"MONDAY","start":"10:00","end":"10:50"},
+				 {"pattern":"EXAM","date":"2026-12-15","start":"09:00","end":"11:00"}]"""))
+			.andExpect(status().isCreated());
+
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-10\"}")
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(jsonPath("$.detail").value(containsString("meets on 2026-12-15, which would be outside the new dates")));
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-15\"}").andExpect(status().isOk());
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: a published term's dates are locked, but it can still be renamed")
+	void publishedDatesLocked() throws Exception {
+		placeAndPublish();
+
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-18\"}")
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.detail").value("A published term's dates cannot be changed."));
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-20\"}").andExpect(status().isOk());
+		send(patch("/api/terms/" + termId), SCHEDULER, nameJson(unique("Live"))).andExpect(status().isOk());
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: moving dates needs authority for every section in the term")
+	void changeDatesNeedsAllDepartments() throws Exception {
+		englishSection();
+
+		send(patch("/api/terms/" + termId), SCHEDULER, "{\"endDate\":\"2026-12-18\"}").andExpect(status().isForbidden());
+		send(patch("/api/terms/" + termId), SCHEDULER, nameJson(unique("Still"))).andExpect(status().isOk());
+	}
+
+	@Test
+	@DisplayName("TC-FR1.1: a blank name in an update is refused")
+	void blankNameOnUpdate() throws Exception {
+		send(patch("/api/terms/" + termId), SCHEDULER, nameJson("  "))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errors.name").value("Term name is required"));
 	}
 
 	@Test

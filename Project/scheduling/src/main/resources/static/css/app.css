@@ -99,6 +99,9 @@ h1, h2, p { margin: 0; }
 .panel-head h2 { font-size: 13.5px; font-weight: 600; }
 .panel-head h2:focus { outline: none; }
 .panel-head .meta { font-size: 12px; color: var(--muted); }
+.head-tools { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.inline-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.toolbar.calendar-filters select { width: 120px; }
 .panel-body { padding: 14px 16px; }
 
 .field { display: flex; flex-direction: column; gap: 5px; }
@@ -158,6 +161,9 @@ td.time { white-space: nowrap; }
 .block.draft { background: var(--draft-soft); border-color: var(--draft-line); color: var(--draft-ink); }
 .block.exam { border-left-width: 3px; }
 .block .course { font-weight: 600; }
+.course-title { font-weight: 400; }
+.block .course-title { display: inline; }
+td .course-title { color: var(--muted); }
 .block span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Classes sharing a column have little width: wrap the course and time, and leave the room to the Term view. */
 .block.narrow { padding: 2px 4px; line-height: 1.2; }
@@ -198,6 +204,7 @@ td select { padding: 3px 6px; font-size: 12px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog form.form-actions { flex-direction: row; }
 .form-body input:not([type="checkbox"]), .form-body select, .form-body textarea { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; font-size: 13px; font-family: inherit; background: var(--surface); color: var(--ink); width: 100%; }
+.form-body input:disabled, .form-body select:disabled { background: var(--bg-2); color: var(--muted); border-color: var(--line-soft); cursor: not-allowed; }
 .group { border: 1px solid var(--line-soft); border-radius: var(--radius); margin: 0; padding: 10px 12px 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .group legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .group .stack { align-self: stretch; }

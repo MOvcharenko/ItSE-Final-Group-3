@@ -48,24 +48,68 @@ function layoutOverlaps(events) {
   return placed;
 }
 
+// How courses are named on the calendar. A per-viewer choice, so it lives in this browser only.
+const COURSE_DISPLAYS = [['BOTH', 'Code and name'], ['CODE', 'Code'], ['NAME', 'Name']];
+const COURSE_DISPLAY_KEY = 'calendar.courseDisplay';
+let courseDisplay = savedCourseDisplay();
+
+function savedCourseDisplay() {
+  try {
+    const saved = localStorage.getItem(COURSE_DISPLAY_KEY);
+    return COURSE_DISPLAYS.some(([value]) => value === saved) ? saved : 'BOTH';
+  } catch {
+    return 'BOTH'; // storage can be blocked, e.g. in a private window
+  }
+}
+
+function saveCourseDisplay(value) {
+  courseDisplay = value;
+  try {
+    localStorage.setItem(COURSE_DISPLAY_KEY, value);
+  } catch {
+    // the choice then lasts until the page reloads
+  }
+}
+
+function courseName(code, title) {
+  return { CODE: code, NAME: title, BOTH: `${code} ${title}` }[courseDisplay];
+}
+
+/** The main label and, when showing both, the course name to follow it in lighter text. */
+function courseParts(event) {
+  const exam = event.pattern === 'EXAM' ? 'Exam · ' : '';
+  if (courseDisplay === 'NAME') return [`${exam}${event.courseTitle} · ${event.sectionNumber}`, null];
+  const code = `${exam}${event.courseCode} · ${event.sectionNumber}`;
+  return [code, courseDisplay === 'BOTH' ? event.courseTitle : null];
+}
+
 function courseLabel(event) {
-  const course = `${event.courseCode} · ${event.sectionNumber}`;
-  return event.pattern === 'EXAM' ? `Exam · ${course}` : course;
+  return courseParts(event).filter(Boolean).join(' ');
+}
+
+function courseNodes(event) {
+  const [main, title] = courseParts(event);
+  return title ? [main, ' ', el('span', { class: 'course-title' }, title)] : [main];
 }
 
 function roomLabel(event) {
   return event.roomName ?? 'No room yet';
 }
 
+function instructorNames(event) {
+  return event.instructors.map((person) => person.name).join(', ');
+}
+
 function showEventDetails(event) {
   const kind = { WEEKLY: 'Weekly class', ONE_TIME: 'One-time meeting', EXAM: 'Exam' }[event.pattern];
   const term = event.termStatus === 'DRAFT' ? `${event.termName} (Draft)` : event.termName;
   openDetails(`${event.courseCode}, section ${event.sectionNumber}`, [
+    ['Course', event.courseTitle],
     ['Type', kind],
     ['When', `${longDate(event.date)}, ${timeRange(event.start, event.end)}`],
     ['Room', roomLabel(event)],
     ['Building', event.building ?? '—'],
-    [event.instructors.length === 1 ? 'Instructor' : 'Instructors', event.instructors.join(', ') || '—'],
+    [event.instructors.length === 1 ? 'Instructor' : 'Instructors', instructorNames(event) || '—'],
     ['Term', term],
   ]);
 }
@@ -82,9 +126,11 @@ function eventBlock({ event, column, columns }, firstHour) {
     type: 'button',
     style: `top:${top}px;height:${height}px;left:calc(${column * width}% + 2px);width:calc(${width}% - 4px)`,
     'aria-label': `${courseLabel(event)}, ${shortDate(event.date)}, ${when}, ${roomLabel(event)}. Show details`,
+    // A narrow block cuts the name off, so hovering shows it whole.
+    title: `${event.courseCode} · ${event.sectionNumber} ${event.courseTitle}\n${when}, ${roomLabel(event)}`,
     onclick: () => showEventDetails(event),
   },
-    el('span', { class: 'course' }, courseLabel(event)),
+    el('span', { class: 'course' }, courseNodes(event)),
     el('span', {}, when),
     el('span', { class: 'room' }, roomLabel(event)));
 }
@@ -130,9 +176,9 @@ function termList(view) {
     return el('tr', {},
       el('td', { class: 'date' }, date),
       el('td', { class: 'time' }, timeRange(event.start, event.end)),
-      el('td', {}, courseLabel(event)),
+      el('td', {}, courseNodes(event)),
       el('td', {}, roomLabel(event)),
-      el('td', {}, event.instructors.join(', ')));
+      el('td', {}, instructorNames(event)));
   });
   return el('div', { class: 'scroll-x' },
     el('table', {},
@@ -158,7 +204,7 @@ function fillFilter(select, allLabel, known) {
 export function calendarScreen(user, setTopbar) {
   // A phone is too narrow for a week without sideways scrolling.
   const state = { view: matchMedia('(max-width: 760px)').matches ? 'DAY' : 'WEEK', date: today(), term: null };
-  const known = { course: new Map(), building: new Map(), room: new Map() };
+  const known = { course: new Map(), instructor: new Map(), building: new Map(), room: new Map() };
   let terms = [];
   let requestNumber = 0;
 
@@ -171,8 +217,19 @@ export function calendarScreen(user, setTopbar) {
   const termTag = el('span', { class: 'tag' });
   const exportButton = el('button', { class: 'btn', type: 'button', disabled: true, onclick: exportTerm }, 'Export .ics');
   const course = filterField('filter-course', 'Course', load);
+  const instructor = filterField('filter-instructor', 'Instructor', load);
   const building = filterField('filter-building', 'Building', load);
   const room = filterField('filter-room', 'Room', load);
+  // A display setting, not a filter, so it sits in the panel header rather than among the filters.
+  const displaySelect = el('select', {
+    id: 'course-display',
+    onchange: () => {
+      saveCourseDisplay(displaySelect.value);
+      if (lastView) showView(lastView);
+    },
+  }, COURSE_DISPLAYS.map(([value, label]) => el('option', { value }, label)));
+  displaySelect.value = courseDisplay;
+  let lastView = null;
 
   const viewButtons = VIEWS.map(([value, label]) => el('button', {
     type: 'button',
@@ -192,17 +249,18 @@ export function calendarScreen(user, setTopbar) {
   function filters() {
     const params = new URLSearchParams({ termId: state.term.id });
     if (course.select.value) params.set('course', course.select.value);
+    if (instructor.select.value) params.set('instructor', instructor.select.value);
     if (building.select.value) params.set('building', building.select.value);
     if (room.select.value) params.set('room', room.select.value);
     return params;
   }
 
   function hasFilters() {
-    return Boolean(course.select.value || building.select.value || room.select.value);
+    return Boolean(course.select.value || instructor.select.value || building.select.value || room.select.value);
   }
 
   function clearFilters() {
-    course.select.value = building.select.value = room.select.value = '';
+    course.select.value = instructor.select.value = building.select.value = room.select.value = '';
     load();
   }
 
@@ -217,7 +275,7 @@ export function calendarScreen(user, setTopbar) {
 
   function clearFilterChoices() {
     Object.values(known).forEach((values) => values.clear());
-    course.select.value = building.select.value = room.select.value = '';
+    course.select.value = instructor.select.value = building.select.value = room.select.value = '';
   }
 
   function emptyState() {
@@ -237,12 +295,16 @@ export function calendarScreen(user, setTopbar) {
   }
 
   function showView(view) {
+    lastView = view;
     view.events.forEach((event) => {
-      known.course.set(event.courseCode, event.courseCode);
+      known.course.set(event.courseCode, event.courseTitle);
+      event.instructors.forEach((person) => known.instructor.set(person.id, person.name ?? person.id));
       if (event.building) known.building.set(event.building, event.building);
       if (event.roomId) known.room.set(event.roomId, event.roomName);
     });
-    fillFilter(course.select, 'All courses', known.course);
+    fillFilter(course.select, 'All courses',
+      new Map([...known.course].map(([code, title]) => [code, courseName(code, title)])));
+    fillFilter(instructor.select, 'All instructors', known.instructor);
     fillFilter(building.select, 'All buildings', known.building);
     fillFilter(room.select, 'All rooms', known.room);
 
@@ -331,12 +393,14 @@ export function calendarScreen(user, setTopbar) {
     load();
   }
 
-  const toolbar = el('div', { class: 'toolbar', hidden: true },
+  const toolbar = el('div', { class: 'toolbar calendar-filters', hidden: true },
     el('div', { class: 'segmented', role: 'group', 'aria-label': 'Calendar view' }, viewButtons),
     el('div', { class: 'spacer' }),
-    course.field, building.field, room.field);
+    course.field, instructor.field, building.field, room.field);
   const calendarPanel = el('section', { class: 'panel' },
-    el('div', { class: 'panel-head' }, el('div', { class: 'period' }, stepper, heading), meta),
+    el('div', { class: 'panel-head' }, el('div', { class: 'period' }, stepper, heading),
+      el('div', { class: 'head-tools' }, meta,
+        el('label', { class: 'inline-field' }, 'Show courses as', displaySelect))),
     toolbar,
     body);
 

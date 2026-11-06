@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import api.dto.AssignmentRequest;
 import api.dto.TermNameRequest;
 import api.dto.TermRequest;
+import api.dto.TermUpdateRequest;
 import jakarta.validation.Valid;
 import service.SectionPlacement;
 import service.TimetableService;
@@ -69,8 +70,8 @@ public class TimetableController {
 
 	@PatchMapping("/terms/{id}")
 	@PreAuthorize("hasRole('SCHEDULER')")
-	public TermView renameTerm(@PathVariable("id") String id, @Valid @RequestBody TermNameRequest r) {
-		return timetable.renameTerm(id, r.name());
+	public TermView updateTerm(@PathVariable("id") String id, @Valid @RequestBody TermUpdateRequest r) {
+		return timetable.updateTerm(id, r.name(), r.startDate(), r.endDate());
 	}
 
 	@DeleteMapping("/terms/{id}")

@@ -40,8 +40,8 @@ Open `http://localhost:8080/` with the dev profile running and pick a test accou
 | `js/dom.js` | `el()` builds elements. Text from the API always goes in as text, so don't use `innerHTML` with it |
 | `js/dates.js` | Date and time formats. Dates are local text such as `2026-11-04`, so avoid `toISOString`, which can shift the day |
 | `js/forms.js` | Labelled fields and `openForm()`, the pop-up form that keeps what was typed and shows the API's message if a save fails |
-| `js/calendar.js`, `js/notices.js` | The calendar screen (Day, Week, Term, filters, `.ics` export) and its notices panel. The sidebar shows the unread count on every screen and checks it each minute |
-| `js/timetable.js` | Schedulers: create, rename, copy, publish and delete terms; add, edit and remove sections |
+| `js/calendar.js`, `js/notices.js` | The calendar screen (Day, Week, Term, filters, `.ics` export) and its notices panel. "Show courses as" (code and name, code, or name) is kept per browser in `localStorage`. The sidebar shows the unread count on every screen and checks it each minute |
+| `js/timetable.js` | Schedulers: create, edit (name and Draft dates), copy, publish and delete terms; add, edit and remove sections |
 | `js/catalog.js` | Schedulers: add subjects, rooms and equipment, and change a room's or item's status |
 | `js/import.js` | The "Import from file" panel on the Catalog screen: template download, upload and row-by-row results |
 | `js/bookings.js` | Schedulers and Instructors: request a room or equipment, and see the requests, filtered by status. Schedulers also approve, decline and cancel them |
@@ -49,8 +49,6 @@ Open `http://localhost:8080/` with the dev profile running and pick a test accou
 
 - **Done:** sign-in with test accounts, the calendar and notices for all three roles, the Scheduler's Timetable and Catalog screens, booking requests and decisions, availability search, and import.- **Waiting on the API:** conflicts, insights and instructor availability have no endpoints yet.
 - **Waiting on the Core Platform:** real sign-in. Until then, the sign-in page only works in the dev profile.
-- **Instructor calendar filter:** not offered yet, because calendar events give instructor names and the filter needs user ids.
-
 The token and the term last chosen are kept in `sessionStorage`, so they end with the browser tab, and each tab can use a different account. Signing out clears both. The role read from the token only chooses what to show; the API still checks every request.
 
 ## Packages (top level, directly under `src/main/java`)
@@ -117,7 +115,7 @@ Any other profile refuses to start unless `spring.security.oauth2.resourceserver
 | `GET /api/instructors` | Scheduler | Everyone a section can name as an instructor, as `{"id","name"}`. Roles are not stored, so staff who don't teach are listed too |
 | `GET /api/terms`, `GET /api/terms/{id}` | All | Students see only published terms; a Draft answers 404 for them |
 | `POST /api/terms` | Scheduler | 201; always starts as a Draft |
-| `PATCH /api/terms/{id}` | Scheduler | body `{"name":"..."}`; rename |
+| `PATCH /api/terms/{id}` | Scheduler | body `{"name","startDate","endDate"}`, each optional: a field left out keeps its value, and everything is saved or nothing is. Only a Draft's dates can change (a Published term answers 409), the caller must be authorized for all its sections, and no one-time meeting or exam may end up outside the new dates (422) |
 | `DELETE /api/terms/{id}` | Scheduler | 204; Draft only, removes its sections, and the caller must be authorized for all of them. A published term answers 409 |
 | `POST /api/terms/{id}/copy` | Scheduler | 201; body `{"name":"..."}`; a new Draft with the same sections, and the caller must be authorized for all of them. A room now out of service is left empty |
 | `POST /api/terms/{id}/publish?confirm=` | Scheduler | Open High conflicts answer 409 until `confirm=true` (FR4.7) |

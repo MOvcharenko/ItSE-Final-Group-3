@@ -50,6 +50,11 @@ public class TermEntity extends AssignedIdEntity {
 		this.name = newName;
 	}
 
+	public void changeDates(LocalDate newStart, LocalDate newEnd) {
+		this.startDate = newStart;
+		this.endDate = newEnd;
+	}
+
 	public void publish(LocalDateTime at) {
 		this.status = TermStatus.PUBLISHED;
 		this.publishedAt = at;

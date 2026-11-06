@@ -147,7 +147,7 @@ export function timetableScreen(user, setTopbar) {
     const details = [el('span', { class: draft ? 'tag draft' : 'tag published' }, draft ? 'Draft' : 'Published'),
       el('span', { class: 'muted' }, dateRange(term.startDate, term.endDate))];
     const actions = [newButton,
-      el('button', { class: 'btn', type: 'button', onclick: renameTerm }, 'Rename term'),
+      el('button', { class: 'btn', type: 'button', onclick: editTerm }, 'Edit term'),
       el('button', { class: 'btn', type: 'button', onclick: copyTerm }, 'Copy term'),
       draft && el('button', { class: 'btn danger-line', type: 'button', onclick: deleteTerm }, 'Delete term'),
       draft && el('button', { class: 'btn primary', type: 'button', onclick: publishTerm }, 'Publish term')].filter(Boolean);
@@ -219,15 +219,30 @@ export function timetableScreen(user, setTopbar) {
     });
   }
 
-  function renameTerm() {
+  function editTerm() {
     const { term } = state;
+    const published = term.status === 'PUBLISHED';
     openForm({
-      title: `Rename ${term.name}`,
-      note: term.status === 'PUBLISHED' ? 'Students and instructors will see the new name. No notice is sent.' : null,
-      submitLabel: 'Save name',
-      body: [field('Name', input('name', { required: true, maxlength: 100, value: term.name }))],
+      title: `Edit ${term.name}`,
+      note: published
+        ? 'Students and instructors will see the new name. No notice is sent. The dates of a published term can’t be changed.'
+        : 'One-time meetings and exams must stay inside the new dates.',
+      submitLabel: 'Save term',
+      body: [
+        field('Name', input('name', { required: true, maxlength: 100, value: term.name })),
+        field('First day', input('startDate', { type: 'date', required: true, value: term.startDate, disabled: published })),
+        field('Last day', input('endDate', { type: 'date', required: true, value: term.endDate, disabled: published })),
+      ],
       onSubmit: async (form) => {
-        Object.assign(term, await patch(`/api/terms/${encodeURIComponent(term.id)}`, { name: form.get('name').trim() }));
+        // Only what changed is sent, and the API saves it all or nothing.
+        const changes = {};
+        const name = form.get('name').trim();
+        if (name !== term.name) changes.name = name;
+        if (!published && form.get('startDate') !== term.startDate) changes.startDate = form.get('startDate');
+        if (!published && form.get('endDate') !== term.endDate) changes.endDate = form.get('endDate');
+        if (!Object.keys(changes).length) return;
+        Object.assign(term, await patch(`/api/terms/${encodeURIComponent(term.id)}`, changes));
+        state.terms.sort((a, b) => b.startDate.localeCompare(a.startDate));
         messages.replaceChildren();
         render();
       },
