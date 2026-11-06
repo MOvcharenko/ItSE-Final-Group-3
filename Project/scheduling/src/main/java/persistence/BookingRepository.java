@@ -14,8 +14,8 @@ import domain.BookingStatus;
  * Two windows overlap when {@code a.start < b.end AND b.start < a.end}: a booking that ends at 17:00 does not block
  * one that starts at 17:00 (TC-FR2.4). Only APPROVED bookings reserve a resource; PENDING ones do not.
  *
- * NOT covered here: rooms and equipment used by timetable sections (section_meeting). The search service must also
- * exclude those once the timetable stream's entities exist, or a room taught in every Monday morning shows as free.
+ * Bookings only: rooms and equipment that timetable sections use are not counted here. BookingServiceImpl adds them
+ * through TimetableOccupancy, so a room taught in every Monday morning does not show as free.
  */
 public interface BookingRepository extends JpaRepository<BookingEntity, String> {
 

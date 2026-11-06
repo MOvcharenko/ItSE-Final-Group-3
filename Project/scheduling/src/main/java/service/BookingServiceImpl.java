@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import domain.BookingStatus;
 import domain.NoticeEvent;
-import domain.NoticeEvent;
 import domain.ResourceStatus;
 import domain.ResourceType;
 import domain.RoomType;

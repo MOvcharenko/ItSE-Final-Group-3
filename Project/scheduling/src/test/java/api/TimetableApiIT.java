@@ -233,6 +233,45 @@ class TimetableApiIT {
 	}
 
 	@Test
+	@DisplayName("My Teaching: an instructor sees only their own sections, once the term is published, with their workload")
+	void myTeaching() throws Exception {
+		send(post("/api/terms/" + termId + "/sections"), SCHEDULER, placement("""
+				[{"pattern":"WEEKLY","day":"MONDAY","start":"10:00","end":"10:50"},
+				 {"pattern":"WEEKLY","day":"WEDNESDAY","start":"10:00","end":"11:15"},
+				 {"pattern":"EXAM","date":"2026-12-15","start":"09:00","end":"11:00"}]"""))
+			.andExpect(status().isCreated());
+		send(post("/api/terms/" + termId + "/sections"), SCHEDULER, json(subject("CS"), roomId, instructors(SCHEDULER), MWF))
+			.andExpect(status().isCreated());
+
+		send(get("/api/teaching?termId=" + termId), BIANCHI, null).andExpect(status().isNotFound());
+		send(get("/api/teaching?termId=" + termId), SCHEDULER, null)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.sections.length()").value(1))
+			.andExpect(jsonPath("$.sections[0].instructors[0].id").value(SCHEDULER));
+
+		send(post("/api/terms/" + termId + "/publish"), SCHEDULER, null).andExpect(status().isOk());
+		send(get("/api/teaching?termId=" + termId), BIANCHI, null)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.term.id").value(termId))
+			.andExpect(jsonPath("$.sections.length()").value(1))
+			.andExpect(jsonPath("$.sections[0].courseTitle").value("A course"))
+			.andExpect(jsonPath("$.sections[0].creditHours").value(3))
+			.andExpect(jsonPath("$.sections[0].meetings.length()").value(3))
+			.andExpect(jsonPath("$.workload.sections").value(1))
+			.andExpect(jsonPath("$.workload.courses").value(1))
+			.andExpect(jsonPath("$.workload.creditHours").value(3))
+			// 50 + 75 minutes a week; the exam does not repeat, so it is not contact time
+			.andExpect(jsonPath("$.workload.weeklyContactMinutes").value(125));
+	}
+
+	@Test
+	@DisplayName("My Teaching: an unknown term is 404 and a student has no teaching schedule")
+	void myTeachingRefusals() throws Exception {
+		send(get("/api/teaching?termId=no-such-term"), BIANCHI, null).andExpect(status().isNotFound());
+		send(get("/api/teaching?termId=" + termId), STUDENT, null).andExpect(status().isForbidden());
+	}
+
+	@Test
 	@DisplayName("TC-FR1.1: a blank name in an update is refused")
 	void blankNameOnUpdate() throws Exception {
 		send(patch("/api/terms/" + termId), SCHEDULER, nameJson("  "))

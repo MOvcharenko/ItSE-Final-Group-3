@@ -6,10 +6,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Section — scheduled instance of a Subject (TR2.3).
- * TODO(Dev B): still holds a single meeting. Replace day/start/end with a list of
- * MeetingTime (weekly, one-time, exam) from the starter core package, so MWF rows
- * and exams fit (plan section 3, fix 1).
+ * Section — scheduled instance of a Subject (TR2.3), as ported from Phase 2 and checked by DomainModelTest.
+ * It holds a single meeting. The application does not use it: its sections are persistence.SectionEntity,
+ * with any number of weekly, one-time and exam meetings, and conflict rules work on core.MeetingTime.
  */
 public class Section {
 
