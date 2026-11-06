@@ -7,6 +7,7 @@ import domain.ConflictType;
 import domain.ResolutionState;
 import domain.Severity;
 import service.view.ConflictView;
+import service.view.DismissalView;
 
 /**
  * Cross-stream contract (owner: Dev B). Detection only: an open conflict never stops a Draft from being saved.
@@ -31,6 +32,9 @@ public interface ConflictService {
 
 	/** Dismisses a conflict as an accepted risk with a mandatory reason and audit entry (FR4.5, NFR3.3). */
 	ConflictView dismiss(String conflictId, String reason);
+
+	/** The dismissal audit log of a term's conflicts, newest first (NFR3.3). */
+	List<DismissalView> listDismissals(String termId);
 
 	/** What changed. */
 	record Ref(String type, String id) {

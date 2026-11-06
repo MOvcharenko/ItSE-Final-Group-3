@@ -3,6 +3,7 @@
 
 const TOKEN_KEY = 'scheduling.token';
 const TERM_KEY = 'scheduling.termId';
+const OPEN_SECTION_KEY = 'scheduling.openSection';
 
 let onSessionEnded = () => {};
 
@@ -39,6 +40,7 @@ export function currentUser() {
 export function signOut() {
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TERM_KEY);
+  sessionStorage.removeItem(OPEN_SECTION_KEY);
 }
 
 /** The term last chosen in this tab, shared by the screens. A screen must check that the user can still see it. */
@@ -48,6 +50,19 @@ export function chosenTermId() {
 
 export function rememberTerm(id) {
   sessionStorage.setItem(TERM_KEY, id);
+}
+
+/** Asks the Timetable screen to open this section's form when it next loads ("Open in timetable"). */
+export function openSectionNext(termId, sectionId) {
+  rememberTerm(termId);
+  sessionStorage.setItem(OPEN_SECTION_KEY, sectionId);
+}
+
+/** The section to open, once: reading it clears it, so a later visit doesn't open it again. */
+export function takeSectionToOpen() {
+  const id = sessionStorage.getItem(OPEN_SECTION_KEY);
+  sessionStorage.removeItem(OPEN_SECTION_KEY);
+  return id;
 }
 
 /** Dev sign-in. In other profiles /dev/token does not exist, and signing in goes through the Core Platform. */

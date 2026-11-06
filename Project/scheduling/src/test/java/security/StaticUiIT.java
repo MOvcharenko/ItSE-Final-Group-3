@@ -27,7 +27,7 @@ class StaticUiIT {
 
 	@ParameterizedTest
 	@ValueSource(strings = { "/", "/index.html", "/css/app.css", "/js/app.js", "/js/api.js", "/js/bookings.js",
-			"/js/calendar.js", "/js/catalog.js", "/js/dates.js", "/js/dom.js", "/js/forms.js", "/js/import.js", "/js/notices.js", "/js/search.js", "/js/timetable.js" })
+			"/js/calendar.js", "/js/catalog.js", "/js/conflicts.js", "/js/dates.js", "/js/dom.js", "/js/forms.js", "/js/import.js", "/js/notices.js", "/js/search.js", "/js/teaching.js", "/js/timetable.js", "/js/timetable-grid.js" })
 	@DisplayName("The static UI is served without a token")
 	void uiFilesAreOpen(String path) throws Exception {
 		mvc.perform(get(path)).andExpect(status().isOk());

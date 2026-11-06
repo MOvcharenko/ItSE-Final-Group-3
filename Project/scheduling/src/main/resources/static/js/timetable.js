@@ -1,7 +1,8 @@
-import { chosenTermId, del, getJson, patch, post, put, rememberTerm } from './api.js';
+import { chosenTermId, del, getJson, patch, post, put, rememberTerm, takeSectionToOpen } from './api.js';
 import { dateRange, shortDate, timeRange } from './dates.js';
 import { banner, el } from './dom.js';
 import { field, input, openForm, select } from './forms.js';
+import { datedMeetings, weekGrid } from './timetable-grid.js';
 
 const DAYS = [['MONDAY', 'Monday'], ['TUESDAY', 'Tuesday'], ['WEDNESDAY', 'Wednesday'], ['THURSDAY', 'Thursday'],
   ['FRIDAY', 'Friday'], ['SATURDAY', 'Saturday'], ['SUNDAY', 'Sunday']];
@@ -11,7 +12,7 @@ const hhmm = (time) => time.slice(0, 5);
 const termLabel = (term) => (term.status === 'DRAFT' ? `${term.name} (Draft)` : term.name);
 const countLabel = (sections) => (sections === 1 ? '1 section' : `${sections} sections`);
 
-function meetingLabel(meeting) {
+export function meetingLabel(meeting) {
   const when = timeRange(meeting.start, meeting.end);
   if (meeting.pattern === 'WEEKLY') {
     return `${DAYS.find(([value]) => value === meeting.day)[1].slice(0, 3)} ${when}`;
@@ -58,8 +59,11 @@ function meetingRow(meeting, term, onRemove) {
 
 /** The Scheduler's builder: terms, the sections in a term, and publishing. */
 export function timetableScreen(user, setTopbar) {
-  const state = { terms: [], term: null, sections: [], subjects: [], rooms: [], equipment: [], instructors: [] };
+  const state = { terms: [], term: null, sections: [], conflicts: [], subjects: [], rooms: [], equipment: [], instructors: [] };
+  // A phone is too narrow for a week grid, so it starts on the list.
+  const view = { mode: matchMedia('(max-width: 760px)').matches ? 'list' : 'grid', busyInstructor: '' };
   const messages = el('div', { class: 'messages' });
+  const status = el('p', { class: 'status', role: 'status' });
   const panel = el('section', { class: 'panel' }, el('div', { class: 'loading' }, 'Loading timetable…'));
   let topbar = null;
   let requestNumber = 0;
@@ -74,6 +78,10 @@ export function timetableScreen(user, setTopbar) {
       messages.replaceChildren();
       const chosen = terms.find((term) => term.id === chosenTermId());
       await selectTerm((chosen ?? terms[0])?.id, false); // opening the screen is not choosing a term
+      // Arrived from "Open in timetable" on the Conflicts screen
+      const openId = takeSectionToOpen();
+      const toOpen = openId && state.sections.find((section) => section.id === openId);
+      if (toOpen) sectionForm(toOpen);
     } catch (error) {
       panel.replaceChildren();
       showError(error, start);
@@ -88,14 +96,19 @@ export function timetableScreen(user, setTopbar) {
     const thisRequest = ++requestNumber;
     const term = state.terms.find((item) => item.id === id) ?? null;
     let sections;
+    let conflicts;
     try {
-      sections = term ? await getJson(`/api/terms/${encodeURIComponent(term.id)}/sections`) : [];
+      const path = term && `/api/terms/${encodeURIComponent(term.id)}`;
+      [sections, conflicts] = term
+        ? await Promise.all([getJson(`${path}/sections`), getJson(`${path}/conflicts?status=OPEN`)])
+        : [[], []];
     } catch (error) {
       if (thisRequest === requestNumber) throw error;
       return;
     }
     if (thisRequest !== requestNumber) return;
-    Object.assign(state, { term, sections });
+    if (term?.id !== state.term?.id) view.busyInstructor = '';
+    Object.assign(state, { term, sections, conflicts });
     if (remember && term) rememberTerm(term.id);
     setSwitching(false);
     render();
@@ -124,6 +137,7 @@ export function timetableScreen(user, setTopbar) {
   }
 
   function render() {
+    status.textContent = ''; // a message from the last action; moveMeeting sets its own after rendering
     renderTopbar();
     panel.replaceChildren(...(state.term ? sectionsPanel() : [el('div', { class: 'empty' },
       el('strong', {}, 'No terms yet'),
@@ -158,9 +172,17 @@ export function timetableScreen(user, setTopbar) {
   function sectionsPanel() {
     const missing = [!state.subjects.length && 'subject', !state.rooms.length && 'room'].filter(Boolean);
     const count = countLabel(state.sections.length);
+    const open = state.conflicts.length;
+    const modes = [['grid', 'Week grid'], ['list', 'List']].map(([mode, text]) => el('button', {
+      type: 'button',
+      'aria-pressed': String(view.mode === mode),
+      onclick: () => { view.mode = mode; status.textContent = ''; render(); },
+    }, text));
     const head = el('div', { class: 'panel-head' },
       el('h2', {}, 'Sections'),
       el('div', { class: 'crumb' },
+        state.sections.length > 0 && el('div', { class: 'segmented', role: 'group', 'aria-label': 'Show sections as' }, modes),
+        open > 0 && el('a', { class: 'tag sev-high', href: '#conflicts' }, `${open} open conflict${open === 1 ? '' : 's'}`),
         el('span', { class: 'meta' }, count),
         !missing.length && el('button', { class: 'btn small', type: 'button', onclick: () => sectionForm() }, 'Add section')));
     if (missing.length) {
@@ -175,11 +197,74 @@ export function timetableScreen(user, setTopbar) {
         el('button', { class: 'btn primary', type: 'button', onclick: () => sectionForm() }, 'Add the first section'))];
     }
     const noRoom = sectionsWithoutRoom();
-    return [head, noRoom > 0 && el('div', { class: 'panel-body' }, banner(
+    return [head, status, noRoom > 0 && el('div', { class: 'panel-body' }, banner(
       `${countLabel(noRoom)} ${noRoom === 1 ? 'has' : 'have'} no room, usually because a copied room is out of service. Use Edit to choose one.`)),
-    el('div', { class: 'scroll-x' }, el('table', {},
+    ...(view.mode === 'grid' ? gridView() : [el('div', { class: 'scroll-x' }, el('table', {},
       el('thead', {}, el('tr', {}, ['Course', 'Section', 'Room', 'Instructors', 'Meets', ''].map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, state.sections.map(sectionRow))))].filter(Boolean);
+      el('tbody', {}, state.sections.map(sectionRow))))])].filter(Boolean);
+  }
+
+  function gridView() {
+    const conflictCounts = new Map();
+    state.conflicts.forEach((conflict) => conflict.sectionIds.forEach((id) => conflictCounts.set(id, (conflictCounts.get(id) ?? 0) + 1)));
+    const teaching = new Map();
+    state.sections.forEach((section) => section.instructors.forEach((person) => teaching.set(person.id, person.name)));
+    const busyPick = select('busy', [['', 'Nobody'], ...[...teaching].sort((a, b) => a[1].localeCompare(b[1]))], view.busyInstructor, {
+      id: 'busy-instructor',
+      onchange: () => { view.busyInstructor = busyPick.value; render(); },
+    });
+    const dated = datedMeetings(state.sections);
+    return [
+      el('div', { class: 'toolbar' },
+        field('Show busy times for', busyPick),
+        el('p', { class: 'hint' }, 'Drag a class to move it. While you drag, times when its instructors or room are already in use are shaded. Click a class to edit it.')),
+      weekGrid({
+        sections: state.sections,
+        published: state.term.status === 'PUBLISHED',
+        conflictCounts,
+        busyInstructor: view.busyInstructor,
+        onOpen: (section) => sectionForm(section),
+        onMove: moveMeeting,
+      }),
+      dated.length > 0 && el('div', { class: 'panel-body dated' },
+        el('h3', {}, 'One-time meetings and exams'),
+        el('ul', {}, dated.map(({ section, meeting }) => el('li', {},
+          el('button', { class: 'btn small quiet', type: 'button', onclick: () => sectionForm(section) },
+            `${section.courseCode} · ${section.sectionNumber}`),
+          ` ${meetingLabel(meeting)}`)))),
+    ].filter(Boolean);
+  }
+
+  /**
+   * Saves a drag on the grid: the section is put back whole with that one meeting changed, so the server checks it
+   * like any other edit and re-runs conflict detection. The answer says if the move caused a conflict.
+   */
+  async function moveMeeting(section, index, to) {
+    const { term } = state;
+    const moved = { pattern: 'WEEKLY', day: to.day, start: to.start, end: to.end };
+    const name = `${section.courseCode} · ${section.sectionNumber}`;
+    if (term.status === 'PUBLISHED'
+      && !confirm(`Move ${name} to ${meetingLabel(moved)}? This term is published, so those affected get a notice.`)) {
+      render(); // put the block back
+      return;
+    }
+    const openBefore = new Set(state.conflicts.map((conflict) => conflict.id));
+    const meetings = section.meetings.map((meeting, i) => (i === index ? moved
+      : { ...meeting, start: hhmm(meeting.start), end: hhmm(meeting.end) }));
+    try {
+      await put(`/api/terms/${encodeURIComponent(term.id)}/sections/${encodeURIComponent(section.id)}`, {
+        subjectId: section.subjectId, sectionNumber: section.sectionNumber, roomId: section.roomId,
+        instructorIds: section.instructors.map((person) => person.id), meetings, equipment: section.equipment,
+      });
+      messages.replaceChildren();
+      await selectTerm(term.id);
+      const caused = state.conflicts.filter((conflict) => !openBefore.has(conflict.id)).length;
+      status.textContent = `${name} moved to ${meetingLabel(moved)}.`
+        + (caused ? ` This caused ${caused === 1 ? '1 new conflict' : `${caused} new conflicts`}; see Conflicts.` : '');
+    } catch (error) {
+      render();
+      showError(error);
+    }
   }
 
   function sectionsWithoutRoom() {

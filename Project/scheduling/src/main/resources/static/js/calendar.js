@@ -11,7 +11,7 @@ const HOUR_PX = 72; // keep in step with --hour in app.css
 const MIN_BLOCK_PX = 24;
 
 /** The term to open with: the one running today (Published first), else the next to start, else the latest. */
-function defaultTerm(terms, date) {
+export function defaultTerm(terms, date) {
   const running = terms.filter((term) => term.startDate <= date && date <= term.endDate);
   const byStart = [...terms].sort((a, b) => a.startDate.localeCompare(b.startDate));
   return running.find((term) => term.status === 'PUBLISHED') ?? running[0]
@@ -19,7 +19,7 @@ function defaultTerm(terms, date) {
 }
 
 /** Gives events that overlap on one day their own columns, side by side. */
-function layoutOverlaps(events) {
+export function layoutOverlaps(events) {
   const sorted = [...events].sort((a, b) => minutes(a.start) - minutes(b.start) || minutes(a.end) - minutes(b.end));
   const placed = [];
   let cluster = [];

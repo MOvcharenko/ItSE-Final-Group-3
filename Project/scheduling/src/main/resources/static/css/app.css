@@ -170,6 +170,27 @@ td .course-title { color: var(--muted); }
 .block.narrow span { white-space: normal; overflow-wrap: anywhere; }
 .block.narrow .room { display: none; }
 
+/* ---------- Timetable Builder grid ---------- */
+.grid.builder .block { z-index: 1; }
+.grid.builder .block.draggable { cursor: grab; touch-action: none; user-select: none; }
+.grid.builder.dragging, .grid.builder.dragging .block { cursor: grabbing; }
+.block.lifted { opacity: .35; }
+/* While dragging, the other classes step back so the shaded "in use" labels can be read */
+.grid.builder.dragging .block:not(.ghost) { opacity: .25; }
+.block.dim { opacity: .4; }
+.block.has-conflict { border-color: var(--warn); }
+.block .course .flag { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-right: 4px; border-radius: 50%; background: var(--warn); color: var(--surface); font-size: 10px; font-weight: 700; vertical-align: 1px; }
+.block.ghost { z-index: 3; background: var(--surface); border: 2px dashed var(--accent); color: var(--accent-ink); pointer-events: none; }
+.block.ghost.clash { border-color: var(--warn); background: var(--warn-soft); color: var(--warn-ink); }
+.busy { position: absolute; left: 0; right: 0; z-index: 0; padding: 2px 4px; overflow: hidden; font-size: 11px; pointer-events: none; }
+.busy span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.busy.overlay { background: repeating-linear-gradient(135deg, var(--bg-2), var(--bg-2) 6px, transparent 6px, transparent 12px); color: var(--muted); }
+/* While dragging, a clash must show over the other classes, so these shades sit above the blocks */
+.busy.drag { z-index: 2; background: var(--warn-soft); color: var(--warn-ink); opacity: .85; }
+.dated h3 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.dated ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+a.tag { text-decoration: none; }
+
 /* ---------- Notices ---------- */
 .notice { display: flex; gap: 10px; padding: 11px 13px; border-bottom: 1px solid var(--line-soft); }
 .notice:last-child { border-bottom: none; }
@@ -183,6 +204,30 @@ td .course-title { color: var(--muted); }
 .stack { display: flex; flex-direction: column; gap: 18px; }
 .stack.small { gap: 10px; }
 .nowrap { white-space: nowrap; }
+.totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 14px 16px 0; border-top: 1px solid var(--line-soft); }
+.totals dt { font-size: 12px; color: var(--muted); }
+.totals dd { margin: 2px 0 0; font-size: 16px; font-weight: 600; }
+.teaching { display: flex; flex-direction: column; gap: 18px; }
+.panel-body p + p { margin-top: 6px; }
+
+/* Conflicts: one row per conflict, severity told by a tag rather than a coloured edge */
+.conflict-list { list-style: none; margin: 0; padding: 0; }
+.conflict { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+.conflict:last-child { border-bottom: none; }
+.conflict-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.conflict-head h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.conflict-head .meta { margin-left: auto; font-size: 12px; color: var(--muted); }
+.conflict p { margin: 0; max-width: 75ch; font-size: 13px; color: var(--ink-2); }
+.affected { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; font-size: 12px; }
+.conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag.sev-high { background: var(--warn-soft); color: var(--warn-ink); }
+.tag.sev-medium { background: var(--draft-soft); color: var(--draft-ink); }
+.tag.sev-low, .tag.dismissed { background: var(--bg-2); color: var(--ink-2); }
+.log > summary { padding: 12px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.log[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.status { margin: 0; padding: 10px 16px 0; font-size: 13px; color: var(--ok-ink); }
+.status:empty { display: none; }
+.panel-body a:not(.btn) { color: var(--accent-ink); }
 .row-actions { white-space: nowrap; text-align: right; }
 .hint { font-size: 12px; color: var(--muted); }
 a.btn, a.nav-item { text-decoration: none; }

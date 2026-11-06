@@ -51,6 +51,7 @@ import persistence.SectionRepository;
 import persistence.TermEntity;
 import persistence.TermRepository;
 import service.view.ConflictView;
+import service.view.DismissalView;
 
 /**
  * Real implementation of ConflictService (FR4, UC-05, UC-06, owner: Dev B).
@@ -384,6 +385,19 @@ public class DefaultConflictService implements ConflictService {
 		auditLogs.save(audit);
 
 		return toView(conflict);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<DismissalView> listDismissals(String termId) {
+		caller.requireScheduler();
+		if (termId == null || !terms.existsById(termId)) {
+			throw NotFoundException.of("Term", termId);
+		}
+		return auditLogs.findForTerm(termId).stream()
+				.map(a -> new DismissalView(a.getId(), a.getConflictId(), a.getConflictType(), a.getConflictExplanation(),
+						a.getUser().getId(), a.getUser().getDisplayName(), a.getOccurredAt(), a.getReason()))
+				.toList();
 	}
 
 	private ConflictView toView(ConflictEntity c) {

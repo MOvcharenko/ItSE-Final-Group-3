@@ -2,8 +2,10 @@ import { currentUser, getJson, setSessionEndedHandler, signIn, signOut } from '.
 import { bookingsScreen } from './bookings.js';
 import { calendarScreen } from './calendar.js';
 import { catalogScreen } from './catalog.js';
+import { conflictsScreen } from './conflicts.js';
 import { banner, el, initials } from './dom.js';
 import { NOTICES_CHANGED, UNREAD_COUNTED } from './notices.js';
+import { teachingScreen } from './teaching.js';
 import { timetableScreen } from './timetable.js';
 
 const UNREAD_REFRESH_MS = 60000;
@@ -19,7 +21,10 @@ const ACCOUNTS = [
 // Add a screen here and it appears in the sidebar for the roles listed. The first one a role can use opens by default.
 const SCREENS = [
   { key: 'timetable', roles: ['SCHEDULER'], title: () => 'Timetable', render: timetableScreen },
+  { key: 'conflicts', roles: ['SCHEDULER'], title: () => 'Conflicts', render: conflictsScreen },
   { key: 'catalog', roles: ['SCHEDULER'], title: () => 'Catalog', render: catalogScreen },
+  // An instructor's primary screen, so it comes first and opens by default for them.
+  { key: 'teaching', roles: ['INSTRUCTOR'], title: () => 'My Teaching', render: teachingScreen },
   {
     key: 'calendar',
     roles: ['SCHEDULER', 'INSTRUCTOR', 'STUDENT'],

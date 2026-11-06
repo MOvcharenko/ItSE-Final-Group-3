@@ -24,6 +24,7 @@ import jakarta.validation.Valid;
 import service.SectionPlacement;
 import service.TimetableService;
 import service.view.SectionView;
+import service.view.TeachingView;
 import service.view.TermView;
 
 /**
@@ -45,6 +46,13 @@ public class TimetableController {
 	@PreAuthorize("hasRole('SCHEDULER')")
 	public List<SectionView.InstructorView> listInstructors() {
 		return timetable.listInstructors();
+	}
+
+	/** My Teaching: the caller's own sections in a term and their workload. There is no way to ask for someone else's. */
+	@GetMapping("/teaching")
+	@PreAuthorize("hasAnyRole('SCHEDULER','INSTRUCTOR')")
+	public TeachingView myTeaching(@RequestParam("termId") String termId) {
+		return timetable.myTeaching(termId);
 	}
 
 	// ---- Terms ----

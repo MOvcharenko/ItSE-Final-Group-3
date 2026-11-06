@@ -1,6 +1,7 @@
 package service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -39,6 +40,7 @@ import persistence.TermRepository;
 import security.CurrentUser;
 import security.CurrentUserProvider;
 import service.view.SectionView;
+import service.view.TeachingView;
 import service.view.TermView;
 
 /**
@@ -111,6 +113,44 @@ public class TimetableService {
 			throw NotFoundException.of("Term", termId);
 		}
 		return toView(term);
+	}
+
+	/**
+	 * My Teaching: the caller's own sections in a term and their workload. The caller always comes from the token, so
+	 * nobody can ask for someone else's. Like the calendar, an Instructor only sees Published terms.
+	 */
+	@Transactional(readOnly = true)
+	public TeachingView myTeaching(String termId) {
+		CurrentUser user = currentUser.get();
+		if (user.role() == Role.STUDENT) {
+			throw new AccessDeniedException("Only instructors and Schedulers have a teaching schedule.");
+		}
+		TermEntity term = term(termId);
+		if (!term.isPublished() && !user.isScheduler()) {
+			throw NotFoundException.of("Term", termId);
+		}
+		List<SectionEntity> mine = sections.findForTerm(termId).stream()
+				.filter(section -> section.getInstructorIds().contains(user.id()))
+				.sorted(Comparator.comparing((SectionEntity s) -> s.getSubject().getCourseCode())
+						.thenComparing(SectionEntity::getSectionNumber))
+				.toList();
+		Map<String, String> names = instructorNames(mine);
+		List<TeachingView.Section> shown = mine.stream().map(section -> {
+			RoomEntity room = section.getRoom();
+			SectionView view = toView(section, names::get);
+			return new TeachingView.Section(section.getId(), section.getSubject().getCourseCode(),
+					section.getSubject().getTitle(), section.getSectionNumber(), section.getSubject().getCreditHours(),
+					room == null ? null : room.getName(), room == null ? null : room.getBuilding(), view.instructors(),
+					view.meetings());
+		}).toList();
+		int weeklyMinutes = mine.stream().flatMap(section -> section.getMeetings().stream())
+				.filter(meeting -> meeting.pattern() == MeetingPattern.WEEKLY)
+				.mapToInt(meeting -> (int) Duration.between(meeting.start(), meeting.end()).toMinutes())
+				.sum();
+		TeachingView.Workload workload = new TeachingView.Workload(mine.size(),
+				(int) mine.stream().map(section -> section.getSubject().getId()).distinct().count(),
+				shown.stream().mapToInt(TeachingView.Section::creditHours).sum(), weeklyMinutes);
+		return new TeachingView(toView(term), shown, workload);
 	}
 
 	public TermView createTerm(String name, LocalDate startDate, LocalDate endDate) {
@@ -482,11 +522,15 @@ public class TimetableService {
 	}
 
 	private List<SectionView> toViews(List<SectionEntity> found) {
+		Map<String, String> names = instructorNames(found);
+		return found.stream().map(section -> toView(section, names::get)).toList();
+	}
+
+	private Map<String, String> instructorNames(List<SectionEntity> found) {
 		Set<String> instructorIds = found.stream().flatMap(s -> s.getInstructorIds().stream())
 				.collect(Collectors.toSet());
-		Map<String, String> names = users.findAllById(instructorIds).stream()
+		return users.findAllById(instructorIds).stream()
 				.collect(Collectors.toMap(AppUserEntity::getId, AppUserEntity::getDisplayName));
-		return found.stream().map(section -> toView(section, names::get)).toList();
 	}
 
 	private static SectionView toView(SectionEntity section, Function<String, String> instructorName) {

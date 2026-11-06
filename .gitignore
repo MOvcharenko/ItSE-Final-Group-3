@@ -1,5 +1,6 @@
-# Word lock files
+# Lock files that Word (~$) and LibreOffice (.~lock) create while a document is open
 ~$*.docx
+.~lock.*#
 
 # Build output and IDE files (the project has its own scheduling/.gitignore too)
 target/

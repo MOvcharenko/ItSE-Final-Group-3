@@ -18,6 +18,7 @@ import domain.Severity;
 import jakarta.validation.Valid;
 import service.ConflictService;
 import service.view.ConflictView;
+import service.view.DismissalView;
 
 /**
  * REST API for reviewing and resolving schedule conflicts (FR4, UC-05, UC-06).
@@ -41,6 +42,13 @@ public class ConflictController {
 			@RequestParam(name = "status", required = false) ResolutionState status
 	) {
 		return conflicts.listConflicts(termId, type, severity, status);
+	}
+
+	/** Who dismissed which of the term's conflicts, when and why, newest first (NFR3.3). */
+	@GetMapping("/api/terms/{id}/dismissals")
+	@PreAuthorize("hasRole('SCHEDULER')")
+	public List<DismissalView> listDismissals(@PathVariable("id") String termId) {
+		return conflicts.listDismissals(termId);
 	}
 
 	@PostMapping("/api/terms/{id}/rescan")
