@@ -39,9 +39,10 @@ function busyFor(section, items) {
 
 /**
  * sections: the term's sections. conflictCounts: open conflicts per section id. busyInstructor: an instructor id whose
- * teaching is shaded, or ''. onOpen(section) opens the form; onMove(section, index, {day, start, end}) saves a drag.
+ * teaching is shaded, or ''. availabilityBlocks: declared availability blocks for busyInstructor.
+ * onOpen(section) opens the form; onMove(section, index, {day, start, end}) saves a drag.
  */
-export function weekGrid({ sections, published, conflictCounts, busyInstructor, onOpen, onMove }) {
+export function weekGrid({ sections, published, conflictCounts, busyInstructor, availabilityBlocks = [], onOpen, onMove }) {
   const items = weeklyItems(sections);
   const days = DAYS.filter(([value], index) => index < 5 || items.some((item) => item.day === value)).map(([value]) => value);
   const firstHour = Math.min(FIRST_HOUR, ...items.map((item) => Math.floor(item.start / 60)));
@@ -63,6 +64,17 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
   // The chosen instructor's teaching, shaded behind the blocks; their own blocks stay bright and the rest dim
   const chosen = busyInstructor ? items.filter((item) => item.section.instructors.some((person) => person.id === busyInstructor)) : [];
   chosen.forEach((item) => band({ ...item, label: `Busy: ${item.section.courseCode}` }, 'overlay'));
+
+  // The chosen instructor's declared availability blocks (FR1.4 overlay lens)
+  if (busyInstructor && availabilityBlocks && availabilityBlocks.length) {
+    availabilityBlocks.forEach((ab) => {
+      const sMin = minutes(ab.startTime);
+      const eMin = minutes(ab.endTime);
+      const kind = ab.status === 'UNAVAILABLE' ? 'overlay-unavailable' : 'overlay-prefer';
+      const lbl = ab.status === 'UNAVAILABLE' ? 'Unavailable' : 'Preferred';
+      band({ day: ab.dayOfWeek, start: sMin, end: eMin, label: `${lbl} (declared)` }, kind);
+    });
+  }
 
   days.forEach((day) => {
     layoutOverlaps(items.filter((item) => item.day === day).map((item) => ({ ...item, start: hhmm(item.start), end: hhmm(item.end), item })))

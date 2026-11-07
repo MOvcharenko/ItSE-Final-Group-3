@@ -61,7 +61,7 @@ function meetingRow(meeting, term, onRemove) {
 export function timetableScreen(user, setTopbar) {
   const state = { terms: [], term: null, sections: [], conflicts: [], subjects: [], rooms: [], equipment: [], instructors: [] };
   // A phone is too narrow for a week grid, so it starts on the list.
-  const view = { mode: matchMedia('(max-width: 760px)').matches ? 'list' : 'grid', busyInstructor: '' };
+  const view = { mode: matchMedia('(max-width: 760px)').matches ? 'list' : 'grid', busyInstructor: '', availabilityBlocks: [] };
   const messages = el('div', { class: 'messages' });
   const status = el('p', { class: 'status', role: 'status' });
   const panel = el('section', { class: 'panel' }, el('div', { class: 'loading' }, 'Loading timetable…'));
@@ -211,7 +211,19 @@ export function timetableScreen(user, setTopbar) {
     state.sections.forEach((section) => section.instructors.forEach((person) => teaching.set(person.id, person.name)));
     const busyPick = select('busy', [['', 'Nobody'], ...[...teaching].sort((a, b) => a[1].localeCompare(b[1]))], view.busyInstructor, {
       id: 'busy-instructor',
-      onchange: () => { view.busyInstructor = busyPick.value; render(); },
+      onchange: async () => {
+        view.busyInstructor = busyPick.value;
+        view.availabilityBlocks = [];
+        if (view.busyInstructor && state.term) {
+          try {
+            const lens = await getJson(`/api/instructors/${encodeURIComponent(view.busyInstructor)}/availability?termId=${encodeURIComponent(state.term.id)}`);
+            view.availabilityBlocks = lens.blocks || [];
+          } catch {
+            view.availabilityBlocks = [];
+          }
+        }
+        render();
+      },
     });
     const dated = datedMeetings(state.sections);
     return [
@@ -223,6 +235,7 @@ export function timetableScreen(user, setTopbar) {
         published: state.term.status === 'PUBLISHED',
         conflictCounts,
         busyInstructor: view.busyInstructor,
+        availabilityBlocks: view.availabilityBlocks,
         onOpen: (section) => sectionForm(section),
         onMove: moveMeeting,
       }),

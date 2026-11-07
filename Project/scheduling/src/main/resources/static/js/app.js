@@ -4,6 +4,7 @@ import { calendarScreen } from './calendar.js';
 import { catalogScreen } from './catalog.js';
 import { conflictsScreen } from './conflicts.js';
 import { banner, el, initials } from './dom.js';
+import { insightsScreen } from './insights.js';
 import { NOTICES_CHANGED, UNREAD_COUNTED } from './notices.js';
 import { teachingScreen } from './teaching.js';
 import { timetableScreen } from './timetable.js';
@@ -22,6 +23,7 @@ const ACCOUNTS = [
 const SCREENS = [
   { key: 'timetable', roles: ['SCHEDULER'], title: () => 'Timetable', render: timetableScreen },
   { key: 'conflicts', roles: ['SCHEDULER'], title: () => 'Conflicts', render: conflictsScreen },
+  { key: 'insights', roles: ['SCHEDULER'], title: () => 'Insights', render: insightsScreen },
   { key: 'catalog', roles: ['SCHEDULER'], title: () => 'Catalog', render: catalogScreen },
   // An instructor's primary screen, so it comes first and opens by default for them.
   { key: 'teaching', roles: ['INSTRUCTOR'], title: () => 'My Teaching', render: teachingScreen },
