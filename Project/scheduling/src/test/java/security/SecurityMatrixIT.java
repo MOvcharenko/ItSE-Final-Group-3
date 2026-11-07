@@ -46,6 +46,7 @@ import service.CalendarService;
 import service.CatalogService;
 import service.ConflictService;
 import service.ImportService;
+import service.InsightsService;
 import service.NoticeService;
 import service.TimetableService;
 
@@ -125,7 +126,9 @@ class SecurityMatrixIT {
 			new Endpoint("POST", "/api/conflicts/{id}/dismiss", "", DISMISS, 200, SCHEDULER),
 			new Endpoint("GET", "/api/terms/{id}/availability/me", "", null, 200, INSTRUCTOR),
 			new Endpoint("PUT", "/api/terms/{id}/availability/me", "", "{\"blocks\":[]}", 200, INSTRUCTOR),
-			new Endpoint("GET", "/api/instructors/{id}/availability", "?termId=X1", null, 200, STAFF));
+			new Endpoint("GET", "/api/instructors/{id}/availability", "?termId=X1", null, 200, STAFF),
+			new Endpoint("GET", "/api/terms/{id}/insights", "", null, 200, SCHEDULER),
+			new Endpoint("POST", "/api/insights/{id}/dismiss", "", null, 200, SCHEDULER));
 
 	@Autowired
 	MockMvc mvc;
@@ -157,6 +160,9 @@ class SecurityMatrixIT {
 
 	@MockitoBean
 	AvailabilityService availability;
+
+	@MockitoBean
+	InsightsService insights;
 
 	@MockitoBean
 	CalendarService calendar;
