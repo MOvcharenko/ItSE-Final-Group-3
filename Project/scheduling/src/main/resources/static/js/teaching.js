@@ -1,4 +1,4 @@
-import { chosenTermId, getJson, rememberTerm } from './api.js';
+import { chosenTermId, getJson, put, rememberTerm } from './api.js';
 import { defaultTerm } from './calendar.js';
 import { today } from './dates.js';
 import { banner, el } from './dom.js';
@@ -18,7 +18,6 @@ function contactTime(minutes) {
 function scheduleRow(section, me) {
   const others = section.instructors.filter((person) => person.id !== me).map((person) => person.name);
   return el('tr', {},
-    // One block per cell, so the phone card layout keeps code and title together on the right.
     el('td', { 'data-label': 'Course' }, el('div', {},
       el('div', {}, el('strong', {}, `${section.courseCode} · ${section.sectionNumber}`)),
       el('div', { class: 'muted' }, section.courseTitle))),
@@ -67,15 +66,158 @@ function workloadPanel({ sections, workload }) {
     el('p', { class: 'hint panel-body' }, 'Weekly hours count time in class each week. One-time meetings and exams are listed in your schedule.'));
 }
 
-function availabilityPanel() {
+const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+const SLOTS = [
+  { start: '08:00:00', end: '10:00:00', label: '08:00 – 10:00' },
+  { start: '10:00:00', end: '12:00:00', label: '10:00 – 12:00' },
+  { start: '12:00:00', end: '14:00:00', label: '12:00 – 14:00' },
+  { start: '14:00:00', end: '16:00:00', label: '14:00 – 16:00' },
+  { start: '16:00:00', end: '18:00:00', label: '16:00 – 18:00' },
+];
+const PORTABLE_EQUIPMENT = ['Projector', 'Laptop cart', 'Mic kit', 'Document camera'];
+
+/**
+ * Interactive availability submission panel (UC-14, TR2.7, NFR3.4, NFR4.3).
+ */
+function availabilityPanel(termId, availabilityData, onSaved) {
+  const readOnly = availabilityData.readOnly;
+  const blocksMap = new Map();
+  availabilityData.blocks.forEach((b) => {
+    blocksMap.set(`${b.dayOfWeek}_${b.startTime}`, b.status);
+  });
+
+  const selectedEquipment = new Set(availabilityData.equipmentNeeds || []);
+  let notesValue = availabilityData.notes || '';
+  const messageEl = el('div', { class: 'panel-message' });
+
+  function nextStatus(curr) {
+    if (!curr || curr === 'OPEN') return 'PREFER';
+    if (curr === 'PREFER') return 'UNAVAILABLE';
+    return 'OPEN';
+  }
+
+  const gridTable = el('table', { class: 'cards' },
+    el('thead', {},
+      el('tr', {},
+        el('th', {}, 'Time Window'),
+        ...DAYS.map((d) => el('th', {}, d.slice(0, 3))))),
+    el('tbody', {},
+      SLOTS.map((slot) => {
+        const cells = DAYS.map((day) => {
+          const key = `${day}_${slot.start}`;
+          const currentStatus = blocksMap.get(key) || 'OPEN';
+          const cellBtn = el('button', {
+            type: 'button',
+            class: `availability-grid-cell avail-${currentStatus}`,
+            disabled: readOnly,
+            onclick: () => {
+              const updated = nextStatus(blocksMap.get(key));
+              blocksMap.set(key, updated);
+              cellBtn.className = `availability-grid-cell avail-${updated}`;
+              cellBtn.textContent = updated;
+              updateSummary();
+            },
+          }, currentStatus);
+          return el('td', {}, cellBtn);
+        });
+        return el('tr', {}, el('td', {}, slot.label), ...cells);
+      })));
+
+  const summaryStrip = el('dl', { class: 'totals' });
+
+  function updateSummary() {
+    let openH = 0, preferH = 0, unavailH = 0;
+    DAYS.forEach((d) => {
+      SLOTS.forEach((s) => {
+        const st = blocksMap.get(`${d}_${s.start}`) || 'OPEN';
+        if (st === 'OPEN') openH += 2;
+        else if (st === 'PREFER') preferH += 2;
+        else if (st === 'UNAVAILABLE') unavailH += 2;
+      });
+    });
+    summaryStrip.replaceChildren(
+      el('div', {}, el('dt', {}, 'Open hours'), el('dd', {}, `${openH} h`)),
+      el('div', {}, el('dt', {}, 'Preferred hours'), el('dd', {}, `${preferH} h`)),
+      el('div', {}, el('dt', {}, 'Unavailable'), el('dd', {}, `${unavailH} h`)),
+      el('div', {}, el('dt', {}, 'Total active'), el('dd', {}, `${openH + preferH} h`)));
+  }
+  updateSummary();
+
+  const equipCheckboxes = PORTABLE_EQUIPMENT.map((item) => {
+    const cb = el('input', {
+      type: 'checkbox',
+      checked: selectedEquipment.has(item),
+      disabled: readOnly,
+      onchange: () => {
+        if (cb.checked) selectedEquipment.add(item);
+        else selectedEquipment.delete(item);
+      },
+    });
+    return el('label', { class: 'checkbox-inline', style: 'margin-right: 16px;' }, cb, ` ${item}`);
+  });
+
+  const notesInput = el('textarea', {
+    class: 'input wide',
+    rows: 2,
+    disabled: readOnly,
+    placeholder: 'Optional notes for scheduler regarding your availability or equipment needs...',
+    oninput: (e) => { notesValue = e.target.value; },
+  }, notesValue);
+
+  const saveBtn = el('button', {
+    class: 'btn primary',
+    type: 'button',
+    disabled: readOnly,
+    onclick: async () => {
+      messageEl.replaceChildren();
+      saveBtn.disabled = true;
+      try {
+        const blocks = [];
+        DAYS.forEach((d) => {
+          SLOTS.forEach((s) => {
+            const st = blocksMap.get(`${d}_${s.start}`) || 'OPEN';
+            blocks.push({ dayOfWeek: d, startTime: s.start, endTime: s.end, status: st });
+          });
+        });
+        await put(`/api/terms/${encodeURIComponent(termId)}/availability/me`, {
+          blocks,
+          equipmentNeeds: [...selectedEquipment],
+          notes: notesValue,
+        });
+        messageEl.replaceChildren(banner('Availability declaration and equipment requests saved successfully!', 'success'));
+        if (onSaved) onSaved();
+      } catch (err) {
+        messageEl.replaceChildren(banner(err.message));
+      } finally {
+        saveBtn.disabled = readOnly;
+      }
+    },
+  }, 'Submit availability');
+
+  const legend = el('div', { class: 'hint', style: 'margin-bottom: 12px;' },
+    'Click blocks to cycle: ',
+    el('span', { class: 'tag insight-success' }, 'OPEN'), ' → ',
+    el('span', { class: 'tag insight-tag' }, 'PREFER (Advisory)'), ' → ',
+    el('span', { class: 'tag insight-conflict-tag' }, 'UNAVAILABLE (Strict)'));
+
   return el('section', { class: 'panel' },
-    el('div', { class: 'panel-head' }, el('h2', {}, 'Availability and equipment needs')),
+    el('div', { class: 'panel-head' },
+      el('h2', {}, 'Availability and equipment needs'),
+      readOnly && el('span', { class: 'tag' }, 'Locked (Published)')),
     el('div', { class: 'panel-body' },
-      el('p', {}, 'Submitting the times you can and can’t teach, and the equipment your courses need, isn’t available yet. Until it is, tell your Scheduler directly.'),
-      el('p', { class: 'hint' }, 'For a one-off room or item, ', el('a', { href: '#bookings' }, 'make a booking request'), '.')));
+      readOnly && el('p', { class: 'hint' }, 'This term is Published. Instructor availability is locked and cannot be changed retroactively (NFR3.4).'),
+      messageEl,
+      legend,
+      gridTable,
+      summaryStrip,
+      el('h3', { style: 'margin-top: 16px;' }, 'Course portable equipment requests'),
+      el('div', { style: 'margin: 8px 0 16px 0;' }, equipCheckboxes),
+      el('h3', {}, 'Notes for scheduler'),
+      el('div', { style: 'margin: 8px 0 16px 0;' }, notesInput),
+      !readOnly && saveBtn));
 }
 
-/** My Teaching: the signed-in instructor's own sections and workload. The API only ever returns the caller's own. */
+/** My Teaching: the signed-in instructor's own sections, workload, and availability (UC-14). */
 export function teachingScreen(user, setTopbar) {
   const messages = el('div', { class: 'messages' });
   const body = el('div', { class: 'teaching', 'aria-live': 'polite' }, el('div', { class: 'loading' }, 'Loading your teaching…'));
@@ -102,12 +244,25 @@ export function teachingScreen(user, setTopbar) {
     const thisRequest = ++requestNumber;
     body.setAttribute('aria-busy', 'true');
     try {
-      const teaching = await getJson(`/api/teaching?termId=${encodeURIComponent(termId)}`);
+      const isDraft = terms.find((t) => t.id === termId)?.status === 'DRAFT';
+      const [teaching, availability] = await Promise.all([
+        isDraft ? Promise.resolve(null) : getJson(`/api/teaching?termId=${encodeURIComponent(termId)}`),
+        getJson(`/api/terms/${encodeURIComponent(termId)}/availability/me`),
+      ]);
       if (thisRequest !== requestNumber) return;
       messages.replaceChildren();
-      body.replaceChildren(
-        el('div', { class: 'two-col' }, schedulePanel(teaching, user.id), workloadPanel(teaching)),
-        availabilityPanel());
+
+      const panels = [];
+      if (teaching) {
+        panels.push(el('div', { class: 'two-col' }, schedulePanel(teaching, user.id), workloadPanel(teaching)));
+      } else {
+        panels.push(el('section', { class: 'panel' }, el('div', { class: 'empty' },
+          el('strong', {}, 'Teaching schedule under construction'),
+          'Course assignments and workload will appear here once the term is published.')));
+      }
+      panels.push(availabilityPanel(termId, availability, () => load(termId)));
+
+      body.replaceChildren(...panels);
     } catch (error) {
       if (thisRequest !== requestNumber) return;
       body.replaceChildren();
@@ -120,8 +275,6 @@ export function teachingScreen(user, setTopbar) {
   async function start() {
     try {
       terms = await getJson('/api/terms');
-      // Instructors can list Drafts, but only see their teaching once a term is Published.
-      if (user.role !== 'SCHEDULER') terms = terms.filter((term) => term.status === 'PUBLISHED');
     } catch (error) {
       body.replaceChildren();
       messages.replaceChildren(banner(error.message, 'Try again', () => { messages.replaceChildren(); start(); }));
@@ -130,12 +283,12 @@ export function teachingScreen(user, setTopbar) {
     if (!terms.length) {
       body.replaceChildren(el('section', { class: 'panel' }, el('div', { class: 'empty' },
         el('strong', {}, 'No terms to show yet'),
-        'Your teaching schedule will appear here once a term is published.')));
+        'Terms will appear here once created by a Scheduler.')));
       return;
     }
     termSelect.replaceChildren(...[...terms].sort((a, b) => b.startDate.localeCompare(a.startDate))
       .map((term) => el('option', { value: term.id }, term.status === 'DRAFT' ? `${term.name} (Draft)` : term.name)));
-    const term = terms.find((item) => item.id === chosenTermId()) ?? defaultTerm(terms, today());
+    const term = terms.find((item) => item.id === chosenTermId()) ?? defaultTerm(terms, today()) ?? terms[0];
     showTerm(term);
     load(term.id);
   }

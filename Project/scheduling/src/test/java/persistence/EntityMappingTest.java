@@ -64,7 +64,7 @@ class EntityMappingTest {
 				BookingEntity.class, ImportBatchEntity.class, TermEntity.class, SectionEntity.class,
 				NoticeEntity.class, ConflictEntity.class, AuditLogEntryEntity.class,
 				InstructorAvailabilityEntity.class, AvailabilitySubmissionEntity.class,
-				InstructorEquipmentNeedEntity.class);
+				InstructorEquipmentNeedEntity.class, InsightSuggestionEntity.class);
 	}
 
 	@BeforeAll

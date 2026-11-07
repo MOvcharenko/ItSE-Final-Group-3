@@ -283,3 +283,131 @@ td select { padding: 3px 6px; font-size: 12px; }
   table.cards td.row-actions { justify-content: flex-end; }
   table.cards td:empty { display: none; }
 }
+
+/* Optimization Insights (NFR4.4, FR5) */
+.insight-panel {
+  border-left: 4px solid var(--color-blue, #2563eb);
+}
+.insight-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.insight-card {
+  background: var(--surface-card, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.insight-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insight-card-titles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.insight-card-message {
+  margin: 0;
+  font-size: 0.925rem;
+  color: var(--text-muted, #475569);
+  line-height: 1.4;
+}
+.insight-tag {
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.insight-conflict-tag {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+}
+.insight-conflict-tag:hover {
+  text-decoration: underline;
+}
+.insight-alert {
+  background: #fef3c7;
+  color: #b45309;
+}
+.insight-success {
+  background: #dcfce7;
+  color: #15803d;
+}
+.insight-amber {
+  background: #fef3c7;
+  color: #92400e;
+}
+.progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.progress-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  min-width: 35px;
+  text-align: right;
+}
+.availability-grid-cell {
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 500;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.avail-OPEN {
+  background: #dcfce7;
+  color: #15803d;
+}
+.avail-PREFER {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.avail-UNAVAILABLE {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Availability Lens Overlay (FR1.4) */
+.busy.overlay-unavailable {
+  background: rgba(239, 68, 68, 0.25);
+  border-left: 3px solid #ef4444;
+  color: #991b1b;
+  z-index: 1;
+}
+.busy.overlay-prefer {
+  background: rgba(59, 130, 246, 0.15);
+  border-left: 3px solid #3b82f6;
+  color: #1e40af;
+  z-index: 1;
+}
