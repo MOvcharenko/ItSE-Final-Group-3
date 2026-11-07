@@ -42,17 +42,16 @@ Open `http://localhost:8080/` with the dev profile running and pick a test accou
 | `js/forms.js` | Labelled fields and `openForm()`, the pop-up form that keeps what was typed and shows the API's message if a save fails |
 | `js/calendar.js`, `js/notices.js` | The calendar screen (Day, Week, Term, filters, `.ics` export) and its notices panel. "Show courses as" (code and name, code, or name) is kept per browser in `localStorage`. The sidebar shows the unread count on every screen and checks it each minute |
 | `js/timetable.js` | Schedulers: create, edit (name and Draft dates), copy, publish and delete terms; add, edit and remove sections, as a week grid or a list. Shows the term's open conflicts and links to them |
-| `js/timetable-grid.js` | The Timetable week grid. Each weekly meeting is a block: drag it to another day or time (5-minute steps), or click it to edit. While dragging, times when its instructors or room are already in use are shaded and the preview turns red on a clash. "Show busy times for" shades one instructor's teaching. Instructors' declared availability will join the shading once its API exists |
+| `js/timetable-grid.js` | The Timetable week grid. Each weekly meeting is a block: drag it to another day or time (5-minute steps), or click it to edit. While dragging, times when its instructors or room are already in use are shaded and the preview turns red on a clash. "Show busy times for" shades one instructor's teaching as well as their declared unavailable and preferred availability blocks |
 | `js/conflicts.js` | Schedulers: the conflicts in a term, filtered by state, type and severity, with the dismissal log, Re-scan, Dismiss (with a reason), Reassign (room and instructors, saved through `PATCH /api/sections/{id}/assignment` so the timetable's own checks apply) and "Open in timetable", which opens that section's form on the Timetable screen |
+| `js/insights.js` | Schedulers: Optimization Insights screen with room occupancy and fill rates against standard 50-hour week, faculty workload metrics, positive confirmations, dismissable suggestion cards, and direct links to open conflicts |
 | `js/catalog.js` | Schedulers: add subjects, rooms and equipment, and change a room's or item's status |
 | `js/import.js` | The "Import from file" panel on the Catalog screen: template download, upload and row-by-row results |
 | `js/bookings.js` | Schedulers and Instructors: request a room or equipment, and see the requests, filtered by status. Schedulers also approve, decline and cancel them |
 | `js/search.js` | The "Search availability" panel on the Bookings screen, for rooms and equipment |
-| `js/teaching.js` | Instructors: My Teaching, their own sections in a term and their workload (sections, credit hours, weekly time in class). It opens first for them |
+| `js/teaching.js` | Instructors: My Teaching screen with their assigned sections, workload calculations, interactive weekly availability grid (Open, Prefer, Unavailable), portable equipment checklist, and draft/published term lock |
 
-- **Done:** sign-in with test accounts, the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts and Catalog screens, the Instructor's My Teaching (schedule and workload), booking requests and decisions, availability search, and import. Publishing asks for confirmation when the term has open High-severity conflicts.
-- **Waiting on the API:** instructor availability and insights have no endpoints yet, so My Teaching's availability and equipment-needs panel only says it is coming.
-- **Waiting on the Core Platform:** real sign-in. Until then, the sign-in page only works in the dev profile.
+- **Done:** sign-in with test accounts and Core Platform OIDC mock, the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts, Insights, and Catalog screens, the Instructor's My Teaching (schedule, workload, availability grid, and equipment needs), booking requests and decisions, availability search, timetable availability lens, and CSV import. Publishing asks for confirmation when the term has open High-severity conflicts.
 
 The token and the term last chosen are kept in `sessionStorage`, so they end with the browser tab, and each tab can use a different account. Signing out clears both. The role read from the token only chooses what to show; the API still checks every request.
 
@@ -84,6 +83,8 @@ Test names carry the TC-ID they cover, e.g. `@DisplayName("TC-FR4.3c: ...")`.
 | `service.TimetableOccupancy` | A | implemented (`SectionOccupancy`). Which rooms and equipment units the timetable uses in a time window, so availability search and booking approval leave out rooms with a class in them |
 | `service.SchedulePlacement` | A | implemented (`ImportedSchedulePlacement`). Places one imported schedule row in the Draft timetable through `TimetableService`, with the same rules and conflict re-check as a section placed by hand |
 | `ConflictService` | B | implemented (`DefaultConflictService`). `recheck` runs after every section change, term copy and date change. **Not yet called** when a booking is approved or cancelled |
+| `AvailabilityService` | B | implemented (`DefaultAvailabilityService`). Manages instructor weekly availability blocks, equipment needs, published term locks, and timetable lens overlays |
+| `InsightsService` | B | implemented (`DefaultInsightsService`). Computes faculty workload and room occupancy/fill analytics against OI-3 standards, positive confirmations, and deduplication with open conflicts |
 | `SisClient` | B | stub only (`StubSisClient`): TD-1 enrollment figures and shared-student counts. The real SIS client is still to come |
 | `CatalogService`, `BookingService`, `ImportService` | C | implemented (`*ServiceImpl`) |
 
@@ -194,6 +195,16 @@ A blank parameter means no filter, so a form can send its unset fields. Filters 
 - Each conflict has a fingerprint. A re-scan updates the existing row instead of adding a duplicate, a conflict whose cause is gone becomes `RESOLVED`, and a `DISMISSED` one stays dismissed.
 - Explanations are plain language and name the sections, e.g. "Room double-booking in Founders 110: MATH 210 sec 01 (MONDAY 10:00–11:00) and PHYS 110 sec 01 (MONDAY 10:30–11:30) overlap."
 - Known gaps are listed under "Not wired yet" at the end of this file.
+
+## REST API: availability & insights (Dev B)
+
+| Method and path | Roles | Notes |
+|---|---|---|
+| `GET /api/terms/{id}/availability/me` | Instructor | Current instructor's declared availability blocks, equipment requirements, and notes for the term |
+| `PUT /api/terms/{id}/availability/me` | Instructor | Save weekly availability blocks (`OPEN`, `PREFER`, `UNAVAILABLE`) and portable equipment needs. Rejects edits if term is `PUBLISHED` (HTTP 409, NFR3.4). Re-checks term conflicts on save |
+| `GET /api/instructors/{id}/availability?termId=` | Scheduler, Instructor | Declared availability lens for timetable scheduling grid. Returns weekly blocks with status and times |
+| `GET /api/terms/{id}/insights` | Scheduler | Optimization insights (FR5): faculty workload vs declared open/prefer hours (FR5.1), room occupancy vs 50h weekly standard and room fill percentage (FR5.2), positive confirmations, and deduplication badge (`alreadyFlagged = true`) linking to open conflicts (FR5.4) |
+| `POST /api/insights/{id}/dismiss` | Scheduler | Dismiss an advisory insight suggestion without modifying timetable state (FR5.3) |
 
 ## Catalog, booking and import: how it works
 
@@ -453,7 +464,6 @@ TD-2 is in `src/test/resources/td2/`: the four filled templates, `schedule-lab-b
 
 - Approving or cancelling a booking does not call `ConflictService.recheck` yet, so its conflicts only change on the next section edit or re-scan (Dev B, in Dev C's `BookingServiceImpl`).
 - A lock timeout during approval is not mapped to a friendly 409 yet: add a handler for `PessimisticLockingFailureException` in `ApiExceptionHandler`.
-- No API yet for instructor availability (so "instructor unavailable" conflicts only come from data loaded directly, and the Timetable grid shades busy teaching times but not declared availability), or for insights.
-- The SIS is a stub, and its student-group counts are keyed by course code and TD-1 section ids, so a student-group clash is not found between sections created through the API.
+- The SIS is a stub, and its student-group counts are keyed by course code and TD-1 section ids, so a student-group clash is not found between sections created through the API. (Instructor availability, timetable overlay lens, and optimization insights are fully implemented and wired).
 
 Spring needs to find the entities and repositories in `persistence`. `SchedulingApplication` lives in `app`, so it must contain `@EntityScan(basePackages = "persistence")` and `@EnableJpaRepositories(basePackages = "persistence")`. Check the `@EntityScan` import with your IDE, because Spring Boot 4 moved it.
