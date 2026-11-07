@@ -38,7 +38,10 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
 				// The static UI holds no data; it signs in first and sends the token with every API call.
-				.requestMatchers(HttpMethod.GET, "/", "/index.html", "/css/**", "/js/**").permitAll()
+				.requestMatchers(HttpMethod.GET, "/", "/index.html", "/signin-callback.html", "/css/**", "/js/**")
+					.permitAll()
+				// Public sign-in configuration: which flow the browser should run (dev token vs OIDC).
+				.requestMatchers(HttpMethod.GET, "/auth/config").permitAll()
 				.anyRequest().authenticated())
 			.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(roleConverter())));
 		return http.build();

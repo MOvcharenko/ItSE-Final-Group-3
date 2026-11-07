@@ -1,4 +1,6 @@
-import { currentUser, getJson, setSessionEndedHandler, signIn, signOut } from './api.js';
+import {
+  currentUser, getAuthConfig, getJson, setSessionEndedHandler, signIn, signOut, startOidcSignIn,
+} from './api.js';
 import { bookingsScreen } from './bookings.js';
 import { calendarScreen } from './calendar.js';
 import { catalogScreen } from './catalog.js';
@@ -65,11 +67,43 @@ async function refreshUnread() {
   }
 }
 
-function showSignIn(message) {
+async function showSignIn(message) {
   unreadBadge = null;
   unreadCount = 0;
   unreadRequest++;
   const messages = el('div', {}, message && banner(message));
+
+  let config;
+  try {
+    config = await getAuthConfig();
+  } catch (error) {
+    document.title = 'Sign in · Academic Scheduling';
+    root.replaceChildren(el('main', { class: 'landing' },
+      el('div', { class: 'brand' },
+        el('h1', {}, 'Academic Scheduling'),
+        el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
+      banner(error.message || 'Could not load sign-in configuration.')));
+    return;
+  }
+
+  const body = config.mode === 'dev'
+    ? devAccountPicker(messages)
+    : oidcSignInButton(messages, config);
+  const note = config.mode === 'dev'
+    ? 'These are test accounts for local development only. The dev profile signs in with /dev/token.'
+    : 'Sign-in is handled by the Core Platform. Your role comes from your account there.';
+
+  document.title = 'Sign in · Academic Scheduling';
+  root.replaceChildren(el('main', { class: 'landing' },
+    el('div', { class: 'brand' },
+      el('h1', {}, 'Academic Scheduling'),
+      el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
+    messages,
+    body,
+    el('p', { class: 'landing-note' }, note)));
+}
+
+function devAccountPicker(messages) {
   const cards = ACCOUNTS.map((account) => el('button', {
     class: 'account',
     type: 'button',
@@ -87,28 +121,35 @@ function showSignIn(message) {
     el('span', { class: 'role' }, ROLE_LABELS[account.role]),
     el('span', { class: 'blurb' }, account.blurb),
     el('span', { class: 'go' }, `Continue as ${ROLE_LABELS[account.role].toLowerCase()} →`)));
-
-  document.title = 'Sign in · Academic Scheduling';
-  root.replaceChildren(el('main', { class: 'landing' },
-    el('div', { class: 'brand' },
-      el('h1', {}, 'Academic Scheduling'),
-      el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
-    messages,
-    el('div', { class: 'accounts' }, cards),
-    el('p', { class: 'landing-note' }, 'These are test accounts for local development. Core Platform sign-in is not connected yet.')));
+  return el('div', { class: 'accounts' }, cards);
 }
 
-function showApp() {
+function oidcSignInButton(messages, config) {
+  const button = el('button', {
+    class: 'btn primary wide',
+    type: 'button',
+    onclick: async () => {
+      try {
+        await startOidcSignIn(config);
+      } catch (error) {
+        messages.replaceChildren(banner(error.message));
+      }
+    },
+  }, 'Sign in with Core Platform →');
+  return el('div', { class: 'oidc-signin' }, button);
+}
+
+async function showApp() {
   const user = currentUser();
   if (!user) {
-    showSignIn();
+    await showSignIn();
     return;
   }
   const screens = SCREENS.filter((screen) => screen.roles.includes(user.role));
   const screen = screens.find((item) => item.key === location.hash.slice(1)) ?? screens[0];
   if (!screen) {
     signOut();
-    showSignIn('This account’s role is not recognized, so there is nothing to show. Please contact your administrator.');
+    await showSignIn('This account’s role is not recognized, so there is nothing to show. Please contact your administrator.');
     return;
   }
 

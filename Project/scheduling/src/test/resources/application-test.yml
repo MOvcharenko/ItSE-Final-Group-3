@@ -7,3 +7,5 @@ spring:
 
 scheduling:
   time-zone: America/New_York
+  auth:
+    mode: dev
