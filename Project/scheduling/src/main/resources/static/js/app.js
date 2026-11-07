@@ -1,5 +1,5 @@
 import {
-  currentUser, getAuthConfig, getJson, setSessionEndedHandler, signIn, signOut, startOidcSignIn,
+  currentUser, getAuthConfig, getJson, setSessionEndedHandler, signIn, signOutOfCorePlatform, startOidcSignIn,
 } from './api.js';
 import { bookingsScreen } from './bookings.js';
 import { calendarScreen } from './calendar.js';
@@ -13,13 +13,15 @@ import { timetableScreen } from './timetable.js';
 
 const UNREAD_REFRESH_MS = 60000;
 
-const ROLE_LABELS = { SCHEDULER: 'Scheduler', INSTRUCTOR: 'Instructor', STUDENT: 'Student' };
+/** "SCHEDULER" → "Scheduler". The role comes from the token or /auth/config, never from a list here. */
+const roleLabel = (role) => role.charAt(0) + role.slice(1).toLowerCase();
 
-const ACCOUNTS = [
-  { id: 'U01', name: 'Maya Brooks', role: 'SCHEDULER', blurb: 'Builds timetables and manages subjects, rooms and equipment.' },
-  { id: 'U02', name: 'L. Bianchi', role: 'INSTRUCTOR', blurb: 'Sees the sections they teach and requests rooms and equipment.' },
-  { id: 'U03', name: 'Jordan Ellis', role: 'STUDENT', blurb: 'Sees the classes and exams they are enrolled in.' },
-];
+// What each role can do, for the dev-account picker. The accounts themselves come from /auth/config.
+const ROLE_BLURBS = {
+  SCHEDULER: 'Builds timetables and manages subjects, rooms and equipment.',
+  INSTRUCTOR: 'Sees the sections they teach and requests rooms and equipment.',
+  STUDENT: 'Sees the classes and exams they are enrolled in.',
+};
 
 // Add a screen here and it appears in the sidebar for the roles listed. The first one a role can use opens by default.
 const SCREENS = [
@@ -69,7 +71,11 @@ async function refreshUnread() {
   }
 }
 
-async function showSignIn(message) {
+/**
+ * switchAccount: the signed-in account can't be used here, so signing in first ends its Core Platform session
+ * (otherwise the Core Platform would sign the same account straight back in).
+ */
+async function showSignIn(message, { switchAccount = false } = {}) {
   unreadBadge = null;
   unreadCount = 0;
   unreadRequest++;
@@ -84,16 +90,31 @@ async function showSignIn(message) {
       el('div', { class: 'brand' },
         el('h1', {}, 'Academic Scheduling'),
         el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
-      banner(error.message || 'Could not load sign-in configuration.')));
+      banner(error.message || 'Could not load sign-in configuration.', 'Try again', () => showSignIn(message, { switchAccount }))));
     return;
   }
 
+  // Nothing to choose here, so go straight to the sign-in form. With a message to read, wait for a click instead.
+  if (config.mode === 'oidc' && !message) {
+    document.title = 'Signing in · Academic Scheduling';
+    root.replaceChildren(el('main', { class: 'landing' },
+      el('div', { class: 'brand' },
+        el('h1', {}, 'Academic Scheduling'),
+        el('p', {}, 'Opening sign-in…'))));
+    try {
+      await startOidcSignIn(config);
+      return;
+    } catch (error) {
+      messages.replaceChildren(banner(error.message));
+    }
+  }
+
   const body = config.mode === 'dev'
-    ? devAccountPicker(messages)
-    : oidcSignInButton(messages, config);
+    ? devAccountPicker(messages, config.accounts)
+    : oidcSignInButton(messages, config, switchAccount);
   const note = config.mode === 'dev'
     ? 'These are test accounts for local development only. The dev profile signs in with /dev/token.'
-    : 'Sign-in is handled by the Core Platform. Your role comes from your account there.';
+    : 'Your role comes from your account.';
 
   document.title = 'Sign in · Academic Scheduling';
   root.replaceChildren(el('main', { class: 'landing' },
@@ -105,8 +126,8 @@ async function showSignIn(message) {
     el('p', { class: 'landing-note' }, note)));
 }
 
-function devAccountPicker(messages) {
-  const cards = ACCOUNTS.map((account) => el('button', {
+function devAccountPicker(messages, accounts) {
+  const cards = accounts.map((account) => el('button', {
     class: 'account',
     type: 'button',
     onclick: async () => {
@@ -120,24 +141,29 @@ function devAccountPicker(messages) {
   },
     el('span', { class: 'avatar large' }, initials(account.name)),
     el('span', { class: 'name' }, account.name),
-    el('span', { class: 'role' }, ROLE_LABELS[account.role]),
-    el('span', { class: 'blurb' }, account.blurb),
-    el('span', { class: 'go' }, `Continue as ${ROLE_LABELS[account.role].toLowerCase()} →`)));
+    el('span', { class: 'role' }, roleLabel(account.role)),
+    el('span', { class: 'blurb' }, ROLE_BLURBS[account.role]),
+    el('span', { class: 'go' }, `Continue as ${account.role.toLowerCase()} →`)));
   return el('div', { class: 'accounts' }, cards);
 }
 
-function oidcSignInButton(messages, config) {
+function oidcSignInButton(messages, config, switchAccount) {
   const button = el('button', {
     class: 'btn primary wide',
     type: 'button',
     onclick: async () => {
+      // A second click would start a second sign-in and overwrite the first one's state, so the return would fail.
+      button.disabled = true;
       try {
+        // Its logout page returns to the app, which then opens sign-in; without one, sign-in asks for an account.
+        if (switchAccount && signOutOfCorePlatform(config)) return;
         await startOidcSignIn(config);
       } catch (error) {
+        button.disabled = false;
         messages.replaceChildren(banner(error.message));
       }
     },
-  }, 'Sign in with Core Platform →');
+  }, 'Sign in →');
   return el('div', { class: 'oidc-signin' }, button);
 }
 
@@ -150,9 +176,16 @@ async function showApp() {
   const screens = SCREENS.filter((screen) => screen.roles.includes(user.role));
   const screen = screens.find((item) => item.key === location.hash.slice(1)) ?? screens[0];
   if (!screen) {
-    signOut();
-    await showSignIn('This account’s role is not recognized, so there is nothing to show. Please contact your administrator.');
+    // The token stays until "Sign in" is clicked: ending the Core Platform session then needs its ID token.
+    await showSignIn('This account’s role is not recognized, so there is nothing to show. Please contact your administrator.',
+      { switchAccount: true });
     return;
+  }
+  let config = null;
+  try {
+    config = await getAuthConfig();
+  } catch {
+    // only the Account link depends on it
   }
 
   const title = screen.title(user.role);
@@ -183,11 +216,16 @@ async function showApp() {
           el('div', { class: 'avatar' }, initials(user.name)),
           el('div', { class: 'text' },
             el('span', { class: 'name' }, user.name),
-            el('span', { class: 'role' }, ROLE_LABELS[user.role]))),
+            el('span', { class: 'role' }, roleLabel(user.role)))),
+        // Change password, and manage accounts for administrators (when the sign-in has those pages).
+        config?.accountUri && el('a', { class: 'btn quiet small wide', href: config.accountUri }, 'Account'),
         el('button', {
           class: 'btn quiet small wide',
           type: 'button',
-          onclick: () => { signOut(); showSignIn(); },
+          onclick: () => {
+            // With a message, the sign-in page waits for a click instead of signing straight back in.
+            if (!signOutOfCorePlatform(config)) showSignIn('You have signed out. Sign in to choose an account.');
+          },
         }, 'Switch account'))),
     el('div', { class: 'main' },
       el('header', { class: 'topbar' },

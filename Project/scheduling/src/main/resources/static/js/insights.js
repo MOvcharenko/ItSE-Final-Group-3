@@ -27,10 +27,13 @@ export function insightsScreen(user, setTopbar) {
     ]);
   }
 
+  /** The one current term: loading and dismissing both read state.term, so they can't disagree. */
   function selectTerm(id) {
-    rememberTerm(id);
     const chosen = state.terms.find((t) => t.id === id);
-    if (chosen) showTopbar(chosen);
+    if (!chosen) return;
+    state.term = chosen;
+    rememberTerm(id);
+    showTopbar(chosen);
     load(id);
   }
 

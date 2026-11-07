@@ -1,0 +1,57 @@
+# Built-in sign-in: one app, a normal username-and-password sign-in. The default for "mvnw spring-boot:run".
+#   cd Project/scheduling && ./mvnw spring-boot:run      → http://localhost:8080/
+#
+# The app plays the Core Platform itself (package signin), so the browser and the API work exactly as they would
+# against the real one. Data, accounts and the signing key are kept in ./data (git-ignored); delete it to start over.
+
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: ""
+  flyway:
+    locations: classpath:db/migration,classpath:db/signin   # + the sign-in accounts
+    # The sign-in migrations are numbered from V100, and ./data keeps its history, so a later main migration such as
+    # V3 is lower than what has already run. Apply it anyway rather than refusing to start.
+    out-of-order: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          audiences: scheduling-api   # the aud of the access tokens the local sign-in issues; the API accepts only this
+
+scheduling:
+  auth:
+    mode: oidc
+    logout-uri: /connect/logout        # "Switch account" ends the sign-in session too
+    account-uri: /account              # "Account" link: change password, manage accounts
+  signin:
+    # Follow the port the app runs on, so "--server.port=8081" signs in too.
+    redirect-uris: http://localhost:${server.port:8080}/signin-callback.html,http://127.0.0.1:${server.port:8080}/signin-callback.html
+    post-logout-redirect-uris: http://localhost:${server.port:8080}/,http://127.0.0.1:${server.port:8080}/
+    access-token-ttl: 8h
+    signing-key-file: ./data/signing-key.json
+    # Created on first start only. Passwords are BCrypt hashes of the demo passwords in the README; change them in
+    # the app under Account → Change password.
+    seed-accounts:
+      - id: U01
+        username: m.brooks
+        name: Maya Brooks
+        email: m.brooks@univ.edu
+        role: SCHEDULER
+        admin: true
+        departments: [CS, MATH]
+        password: "{bcrypt}$2a$10$bXUyfqfQ3HQGre2f6xHKe.KJsGBWODb0UPA7zT/ycuIozzIu2TusO"
+      - id: U02
+        username: l.bianchi
+        name: L. Bianchi
+        email: l.bianchi@univ.edu
+        role: INSTRUCTOR
+        home-department: MATH
+        password: "{bcrypt}$2a$10$LomPiTuk.mr/vYoek/F8Y.zUkWoZegJnaFHvHeF7tI/M5IBqgKefS"
+      - id: U03
+        username: j.ellis
+        name: Jordan Ellis
+        email: j.ellis@univ.edu
+        role: STUDENT
+        password: "{bcrypt}$2a$10$axS9c1qBJF8XvBIwmkJCceFI9LpWlibDnu8QPnbK3znAR3fYcePDu"

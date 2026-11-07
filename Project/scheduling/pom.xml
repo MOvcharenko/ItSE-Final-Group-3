@@ -15,6 +15,9 @@
 	<description>Academic Scheduling module (SDT 213, Team 3)</description>
 	<properties>
 		<java.version>21</java.version>
+		<!-- "mvnw spring-boot:run" starts with the built-in sign-in. Override with -Dspring-boot.run.profiles=dev etc.
+		     Only affects spring-boot:run: tests and the packaged jar are unaffected. -->
+		<spring-boot.run.profiles>local</spring-boot.run.profiles>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -40,6 +43,14 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-oauth2-authorization-server</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-thymeleaf</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

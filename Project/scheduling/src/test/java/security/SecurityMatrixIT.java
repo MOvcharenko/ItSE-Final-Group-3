@@ -128,7 +128,7 @@ class SecurityMatrixIT {
 			new Endpoint("PUT", "/api/terms/{id}/availability/me", "", "{\"blocks\":[]}", 200, INSTRUCTOR),
 			new Endpoint("GET", "/api/instructors/{id}/availability", "?termId=X1", null, 200, STAFF),
 			new Endpoint("GET", "/api/terms/{id}/insights", "", null, 200, SCHEDULER),
-			new Endpoint("POST", "/api/insights/{id}/dismiss", "", null, 200, SCHEDULER));
+			new Endpoint("POST", "/api/insights/{id}/dismiss", "", null, 204, SCHEDULER));
 
 	@Autowired
 	MockMvc mvc;

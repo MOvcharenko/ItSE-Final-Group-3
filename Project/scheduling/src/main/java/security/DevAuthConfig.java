@@ -7,7 +7,6 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Clock;
 
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -25,9 +24,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
-
-import persistence.AppUserEntity;
-import persistence.AppUserRepository;
 
 /**
  * Plays the Core Platform locally (TP3): signs tokens with a key generated at startup, so no secret is
@@ -74,24 +70,6 @@ public class DevAuthConfig {
 			.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
 			.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
 		return http.build();
-	}
-
-	/** Profiles for the TP3 staff accounts. Students are not stored here: the SIS owns them (TR1.3). */
-	@Bean
-	public ApplicationRunner devAccountsLoader(AppUserRepository users) {
-		return args -> {
-			if (!users.existsById(DevAccount.MAYA_BROOKS.id)) {
-				AppUserEntity maya = new AppUserEntity(DevAccount.MAYA_BROOKS.id, DevAccount.MAYA_BROOKS.displayName,
-						"m.brooks@univ.edu", null);
-				maya.authorizeDepartment("CS");
-				maya.authorizeDepartment("MATH");
-				users.save(maya);
-			}
-			if (!users.existsById(DevAccount.L_BIANCHI.id)) {
-				users.save(new AppUserEntity(DevAccount.L_BIANCHI.id, DevAccount.L_BIANCHI.displayName,
-						"l.bianchi@univ.edu", "MATH"));
-			}
-		};
 	}
 
 }

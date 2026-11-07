@@ -8,14 +8,34 @@ You need JDK 21 or newer (`java -version`).
 ## Start the app
 
 ```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+```sh
+./mvnw spring-boot:run
+```
+
+It's ready when the log says `Started SchedulingApplication`. To stop it, press `Ctrl+C` in that terminal.
+
+Open `http://localhost:8080/`. You go straight to the sign-in form:
+
+| Username | Password | Role |
+|---|---|---|
+| `m.brooks` | `Scheduler#2026` | Scheduler (CS, MATH), and account administrator |
+| `l.bianchi` | `Instructor#2026` | Instructor |
+| `j.ellis` | `Student#2026` | Student |
+
+These are demo passwords. **Account** in the sidebar changes your password; Maya can also create, reset and disable accounts there. **Switch account** signs you out. Data, accounts and passwords are kept in `./data` across restarts; delete that folder to start over.
+
+This is the `local` profile, the default for `spring-boot:run`. The app signs people in itself, the way the Core Platform will. To use the API from a terminal with the commands below, start the `dev` profile instead, which has no passwords and an in-memory database:
+
+```powershell
 .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=dev'
 ```
 
 ```sh
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
-
-It's ready when the log says `Started SchedulingApplication`. To stop it, press `Ctrl+C` in that terminal.
 
 Check that it's running, from a second terminal:
 
@@ -26,7 +46,7 @@ curl.exe http://localhost:8080/actuator/health
 You should see `"status":"UP"`.
 
 - **To use the web UI,** open `http://localhost:8080/` in a browser and sign in as Maya Brooks, the Scheduler. The app starts empty: add subjects and rooms under **Catalog**, then a term and its sections under **Timetable**, and publish the term so that the other accounts can see it.
-- **The database is in memory.** Restarting the app deletes all data, and old tokens stop working, so get a new one.
+- **In the dev profile the database is in memory.** Restarting deletes all data, and old tokens stop working, so get a new one.
 
 ## Sign in
 

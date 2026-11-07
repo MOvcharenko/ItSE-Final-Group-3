@@ -74,12 +74,23 @@ const SLOTS = [
   { start: '14:00:00', end: '16:00:00', label: '14:00 – 16:00' },
   { start: '16:00:00', end: '18:00:00', label: '16:00 – 18:00' },
 ];
-const PORTABLE_EQUIPMENT = ['Projector', 'Laptop cart', 'Mic kit', 'Document camera'];
+/**
+ * The equipment types to offer: those in the catalog, plus any this instructor already asked for that the catalog
+ * no longer has, so a saved request stays visible and can be unticked. One entry per type whatever its case.
+ */
+function equipmentChoices(catalogTypes, requested) {
+  const unique = new Map();
+  [...catalogTypes, ...requested].forEach((type) => {
+    if (!unique.has(type.toLowerCase())) unique.set(type.toLowerCase(), type);
+  });
+  return [...unique.values()].sort((a, b) => a.localeCompare(b));
+}
 
 /**
- * Interactive availability submission panel (UC-14, TR2.7, NFR3.4, NFR4.3).
+ * Interactive availability submission panel (UC-14, TR2.7, NFR3.4, NFR4.3). equipmentTypes are the catalog's item
+ * types; savedMessage, if any, says the last save worked (the panel is rebuilt after a save).
  */
-function availabilityPanel(termId, availabilityData, onSaved) {
+function availabilityPanel(termId, availabilityData, equipmentTypes, savedMessage, onSaved) {
   const readOnly = availabilityData.readOnly;
   const blocksMap = new Map();
   availabilityData.blocks.forEach((b) => {
@@ -89,6 +100,7 @@ function availabilityPanel(termId, availabilityData, onSaved) {
   const selectedEquipment = new Set(availabilityData.equipmentNeeds || []);
   let notesValue = availabilityData.notes || '';
   const messageEl = el('div', { class: 'panel-message' });
+  const status = el('p', { class: 'status', role: 'status' }, savedMessage ?? '');
 
   function nextStatus(curr) {
     if (!curr || curr === 'OPEN') return 'PREFER';
@@ -143,7 +155,8 @@ function availabilityPanel(termId, availabilityData, onSaved) {
   }
   updateSummary();
 
-  const equipCheckboxes = PORTABLE_EQUIPMENT.map((item) => {
+  const choices = equipmentChoices(equipmentTypes, [...selectedEquipment]);
+  const equipCheckboxes = choices.length ? choices.map((item) => {
     const cb = el('input', {
       type: 'checkbox',
       checked: selectedEquipment.has(item),
@@ -154,7 +167,7 @@ function availabilityPanel(termId, availabilityData, onSaved) {
       },
     });
     return el('label', { class: 'checkbox-inline', style: 'margin-right: 16px;' }, cb, ` ${item}`);
-  });
+  }) : el('p', { class: 'hint' }, 'The catalog has no portable equipment yet.');
 
   const notesInput = el('textarea', {
     class: 'input wide',
@@ -170,6 +183,7 @@ function availabilityPanel(termId, availabilityData, onSaved) {
     disabled: readOnly,
     onclick: async () => {
       messageEl.replaceChildren();
+      status.textContent = '';
       saveBtn.disabled = true;
       try {
         const blocks = [];
@@ -184,8 +198,9 @@ function availabilityPanel(termId, availabilityData, onSaved) {
           equipmentNeeds: [...selectedEquipment],
           notes: notesValue,
         });
-        messageEl.replaceChildren(banner('Availability declaration and equipment requests saved successfully!', 'success'));
-        if (onSaved) onSaved();
+        // Reloads the panel, which then shows the saved message as its status line.
+        if (onSaved) onSaved('Availability and equipment needs saved.');
+        else status.textContent = 'Availability and equipment needs saved.';
       } catch (err) {
         messageEl.replaceChildren(banner(err.message));
       } finally {
@@ -207,6 +222,7 @@ function availabilityPanel(termId, availabilityData, onSaved) {
     el('div', { class: 'panel-body' },
       readOnly && el('p', { class: 'hint' }, 'This term is Published. Instructor availability is locked and cannot be changed retroactively (NFR3.4).'),
       messageEl,
+      status,
       legend,
       gridTable,
       summaryStrip,
@@ -240,14 +256,16 @@ export function teachingScreen(user, setTopbar) {
     load(id);
   }
 
-  async function load(termId) {
+  /** savedMessage: after a save, what the rebuilt availability panel should confirm. */
+  async function load(termId, savedMessage) {
     const thisRequest = ++requestNumber;
     body.setAttribute('aria-busy', 'true');
     try {
       const isDraft = terms.find((t) => t.id === termId)?.status === 'DRAFT';
-      const [teaching, availability] = await Promise.all([
+      const [teaching, availability, equipment] = await Promise.all([
         isDraft ? Promise.resolve(null) : getJson(`/api/teaching?termId=${encodeURIComponent(termId)}`),
         getJson(`/api/terms/${encodeURIComponent(termId)}/availability/me`),
+        getJson('/api/equipment'),
       ]);
       if (thisRequest !== requestNumber) return;
       messages.replaceChildren();
@@ -260,7 +278,8 @@ export function teachingScreen(user, setTopbar) {
           el('strong', {}, 'Teaching schedule under construction'),
           'Course assignments and workload will appear here once the term is published.')));
       }
-      panels.push(availabilityPanel(termId, availability, () => load(termId)));
+      panels.push(availabilityPanel(termId, availability, equipment.map((item) => item.itemType), savedMessage,
+        (message) => load(termId, message)));
 
       body.replaceChildren(...panels);
     } catch (error) {

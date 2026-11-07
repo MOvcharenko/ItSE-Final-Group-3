@@ -111,7 +111,7 @@ class InsightsApiIT {
 
 		// Dismiss
 		send(post("/api/insights/" + suggestionId + "/dismiss"), SCHEDULER_ID, null)
-				.andExpect(status().isOk());
+				.andExpect(status().isNoContent());
 
 		InsightSuggestionEntity entity = suggestions.findById(suggestionId).orElseThrow();
 		assertTrue(entity.isDismissed());

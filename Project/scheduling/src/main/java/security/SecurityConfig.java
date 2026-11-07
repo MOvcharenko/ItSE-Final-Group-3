@@ -34,7 +34,10 @@ public class SecurityConfig {
 	public SecurityFilterChain apiSecurity(HttpSecurity http) throws Exception {
 		http
 			.csrf(csrf -> csrf.disable())
-			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+			// The API never uses a session. Session-fixation protection would otherwise rotate the sign-in page's session
+			// id on every API call that carries its cookie, and calls made at once then leave the cookie on a stale id.
+			.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+				.sessionFixation(fixation -> fixation.none()))
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
 				// The static UI holds no data; it signs in first and sends the token with every API call.

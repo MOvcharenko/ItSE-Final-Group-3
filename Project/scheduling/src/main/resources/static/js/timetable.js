@@ -67,6 +67,7 @@ export function timetableScreen(user, setTopbar) {
   const panel = el('section', { class: 'panel' }, el('div', { class: 'loading' }, 'Loading timetable…'));
   let topbar = null;
   let requestNumber = 0;
+  let busyRequest = 0; // the "Show busy times for" lookup, so only the latest choice's answer is shown
 
   const showError = (error, retry) => messages.replaceChildren(banner(error.message, retry && 'Try again', retry));
 
@@ -107,7 +108,11 @@ export function timetableScreen(user, setTopbar) {
       return;
     }
     if (thisRequest !== requestNumber) return;
-    if (term?.id !== state.term?.id) view.busyInstructor = '';
+    if (term?.id !== state.term?.id) {
+      view.busyInstructor = '';
+      view.availabilityBlocks = [];
+      busyRequest++; // an answer still on its way is for the term being left
+    }
     Object.assign(state, { term, sections, conflicts });
     if (remember && term) rememberTerm(term.id);
     setSwitching(false);
@@ -212,17 +217,24 @@ export function timetableScreen(user, setTopbar) {
     const busyPick = select('busy', [['', 'Nobody'], ...[...teaching].sort((a, b) => a[1].localeCompare(b[1]))], view.busyInstructor, {
       id: 'busy-instructor',
       onchange: async () => {
+        const thisRequest = ++busyRequest;
+        messages.replaceChildren(); // an earlier lookup's error no longer applies
         view.busyInstructor = busyPick.value;
         view.availabilityBlocks = [];
+        let failure = null;
         if (view.busyInstructor && state.term) {
           try {
             const lens = await getJson(`/api/instructors/${encodeURIComponent(view.busyInstructor)}/availability?termId=${encodeURIComponent(state.term.id)}`);
+            if (thisRequest !== busyRequest) return; // a newer choice has taken over
             view.availabilityBlocks = lens.blocks || [];
-          } catch {
-            view.availabilityBlocks = [];
+          } catch (error) {
+            if (thisRequest !== busyRequest) return;
+            failure = error;
           }
         }
         render();
+        // Their teaching is still shaded; only the declared availability couldn't be shown.
+        if (failure) showError(failure);
       },
     });
     const dated = datedMeetings(state.sections);

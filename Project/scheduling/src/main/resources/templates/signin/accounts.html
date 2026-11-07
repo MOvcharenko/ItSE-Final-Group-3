@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{signin/fragments :: head('Manage accounts')}"></head>
+<body>
+<nav th:replace="~{signin/fragments :: nav(${account}, 'accounts')}"></nav>
+<main class="account-page">
+  <div th:replace="~{signin/fragments :: messages}"></div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Accounts</h2></div>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Id</th><th>Username</th><th>Name</th><th>Role</th><th>Status</th><th>Reset password</th></tr></thead>
+        <tbody>
+          <tr th:each="a : ${accounts}">
+            <td th:text="${a.id}"></td>
+            <td th:text="${a.username}"></td>
+            <td>
+              <span th:text="${a.name}"></span>
+              <div class="muted" th:if="${!a.departments.isEmpty()}" th:text="${#strings.listJoin(a.departments, ', ')}"></div>
+              <div class="muted" th:if="${a.homeDepartment}" th:text="${a.homeDepartment}"></div>
+            </td>
+            <td>
+              <span th:text="${#strings.capitalize(#strings.toLowerCase(a.role))}"></span>
+              <div class="muted" th:if="${a.admin}">Administrator</div>
+            </td>
+            <td>
+              <form th:action="@{/admin/accounts/{id}/enabled(id=${a.id})}" method="post" class="inline">
+                <span th:text="${a.enabled} ? 'Active' : 'Disabled'"></span>
+                <input type="hidden" name="enabled" th:value="${!a.enabled}">
+                <button class="btn small" type="submit" th:text="${a.enabled} ? 'Disable' : 'Enable'"
+                        th:unless="${a.id == account.id}"></button>
+              </form>
+            </td>
+            <td>
+              <form th:action="@{/admin/accounts/{id}/password(id=${a.id})}" method="post" class="inline">
+                <input name="password" type="password" autocomplete="new-password" placeholder="New password"
+                       th:attr="aria-label='New password for ' + ${a.id}" required>
+                <input name="confirmation" type="password" autocomplete="new-password" placeholder="Again"
+                       th:attr="aria-label='New password again for ' + ${a.id}" required>
+                <button class="btn small" type="submit">Reset</button>
+              </form>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>New account</h2></div>
+    <div class="panel-body">
+      <form class="stack" th:action="@{/admin/accounts}" method="post">
+        <div class="field"><label for="id">Id (the user id in Academic Scheduling; cannot be changed)</label>
+          <input id="id" name="id" required maxlength="100"></div>
+        <div class="field"><label for="username">Username</label>
+          <input id="username" name="username" required maxlength="100"></div>
+        <div class="field"><label for="name">Name</label>
+          <input id="name" name="name" required maxlength="150"></div>
+        <div class="field"><label for="email">Email</label>
+          <input id="email" name="email" type="email" maxlength="200"></div>
+        <div class="field"><label for="role">Role</label>
+          <select id="role" name="role" required>
+            <option th:each="r : ${roles}" th:value="${r}" th:text="${#strings.capitalize(#strings.toLowerCase(r))}"></option>
+          </select></div>
+        <div class="field"><label for="departments">Departments (schedulers only, comma-separated)</label>
+          <input id="departments" name="departments" placeholder="CS, MATH"></div>
+        <div class="field"><label for="homeDepartment">Home department (instructors only)</label>
+          <input id="homeDepartment" name="homeDepartment" maxlength="100" placeholder="MATH"></div>
+        <label class="check"><input type="checkbox" name="admin" value="true"> Administrator (can manage accounts)</label>
+        <div class="field"><label for="new-password" th:text="'Password (at least ' + ${minLength} + ' characters)'">Password</label>
+          <input id="new-password" name="password" type="password" autocomplete="new-password" required th:attr="minlength=${minLength}"></div>
+        <div class="field"><label for="new-confirmation">Password again</label>
+          <input id="new-confirmation" name="confirmation" type="password" autocomplete="new-password" required></div>
+        <button class="btn primary" type="submit">Create account</button>
+      </form>
+    </div>
+  </section>
+</main>
+</body>
+</html>

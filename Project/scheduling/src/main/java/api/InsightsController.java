@@ -1,9 +1,11 @@
 package api;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import service.InsightsService;
@@ -34,6 +36,7 @@ public class InsightsController {
 	 * Dismisses an advisory suggestion card without altering the schedule (FR5.3).
 	 */
 	@PostMapping("/api/insights/{id}/dismiss")
+	@ResponseStatus(HttpStatus.NO_CONTENT) // no body: a 200 with nothing in it can't be read as JSON
 	@PreAuthorize("hasRole('SCHEDULER')")
 	public void dismissSuggestion(@PathVariable("id") String suggestionId) {
 		insights.dismissSuggestion(suggestionId);

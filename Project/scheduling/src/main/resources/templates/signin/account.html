@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{signin/fragments :: head('Account')}"></head>
+<body>
+<nav th:replace="~{signin/fragments :: nav(${account}, 'account')}"></nav>
+<main class="account-page">
+  <section class="panel">
+    <div class="panel-head"><h2 th:text="${account.name}">Name</h2></div>
+    <div class="panel-body">
+      <table>
+        <tr><th scope="row">Username</th><td th:text="${account.username}"></td></tr>
+        <tr><th scope="row">Id</th><td th:text="${account.id}"></td></tr>
+        <tr><th scope="row">Email</th><td th:text="${account.email} ?: '—'"></td></tr>
+        <tr><th scope="row">Role</th><td th:text="${#strings.capitalize(#strings.toLowerCase(account.role))}"></td></tr>
+        <tr th:if="${!account.departments.isEmpty()}"><th scope="row">Departments</th>
+          <td th:text="${#strings.listJoin(account.departments, ', ')}"></td></tr>
+        <tr th:if="${account.homeDepartment}"><th scope="row">Home department</th><td th:text="${account.homeDepartment}"></td></tr>
+        <tr th:if="${account.admin}"><th scope="row">Administrator</th><td>Yes — can manage accounts</td></tr>
+      </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>

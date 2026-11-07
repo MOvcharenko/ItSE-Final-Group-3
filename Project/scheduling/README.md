@@ -23,15 +23,16 @@ Step-by-step commands, including PowerShell, are in [commands.md](commands.md).
 ```sh
 cd Project/scheduling
 ./mvnw verify                                        # unit tests (*Test) + integration tests (*IT)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+./mvnw spring-boot:run                               # profile "local": built-in sign-in, http://localhost:8080/
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # test-account picker and POST /dev/token, for API work
 ```
 
-The dev profile uses in-memory H2 in PostgreSQL mode, with the console at `/h2-console`.
+The local profile keeps its H2 database (PostgreSQL mode) in `./data`; the dev profile's is in memory, with the console at `/h2-console`.
 `GET /actuator/health` and the web UI's own files are open; everything else needs a JWT (see Signing in below).
 
 ## Web UI
 
-Open `http://localhost:8080/` with the dev profile running and pick a test account. The pages are plain HTML, CSS and JavaScript modules in `src/main/resources/static`, with no build step or framework. `Project/UI Mockup/` is the design reference.
+Open `http://localhost:8080/` and sign in (`m.brooks` / `Scheduler#2026`; all accounts are in [commands.md](commands.md)). With the dev profile, pick a test account instead. The pages are plain HTML, CSS and JavaScript modules in `src/main/resources/static`, with no build step or framework. `Project/UI Mockup/` is the design reference.
 
 | File | What it does |
 |---|---|
@@ -51,7 +52,8 @@ Open `http://localhost:8080/` with the dev profile running and pick a test accou
 | `js/search.js` | The "Search availability" panel on the Bookings screen, for rooms and equipment |
 | `js/teaching.js` | Instructors: My Teaching screen with their assigned sections, workload calculations, interactive weekly availability grid (Open, Prefer, Unavailable), portable equipment checklist, and draft/published term lock |
 
-- **Done:** sign-in with test accounts and Core Platform OIDC mock, the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts, Insights, and Catalog screens, the Instructor's My Teaching (schedule, workload, availability grid, and equipment needs), booking requests and decisions, availability search, timetable availability lens, and CSV import. Publishing asks for confirmation when the term has open High-severity conflicts.
+- **Done:** sign-in (username and password in the local profile, test accounts in the dev profile), the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts, Insights, and Catalog screens, the Instructor's My Teaching (schedule, workload, availability grid, and equipment needs), booking requests and decisions, availability search, timetable availability lens, and CSV import. Publishing asks for confirmation when the term has open High-severity conflicts.
+- **Sign-in:** the local profile signs people in with a username and password itself (see Signing in). A deployment points at the Core Platform instead.
 
 The token and the term last chosen are kept in `sessionStorage`, so they end with the browser tab, and each tab can use a different account. Signing out clears both. The role read from the token only chooses what to show; the API still checks every request.
 
@@ -65,6 +67,7 @@ The token and the term last chosen are kept in `sessionStorage`, so they end wit
 | `persistence` | data access | JPA entities + repositories; schema only via Flyway (`src/main/resources/db/migration`) |
 | `integration` | external | `SisClient` + stub; failures degrade |
 | `security` | security | JWT config, `CurrentUserProvider` |
+| `signin` | security | the built-in sign-in, profile `local` only: Spring Authorization Server, accounts, sign-in form and account pages |
 | `app` | entry point | `SchedulingApplication`; lists the packages Spring scans, so **add any new top-level package to `scanBasePackages`** |
 | `domain` | shared | enums and the pure model ported from Phase 2 (no Spring/JPA); JPA entities are separate, in `persistence` |
 
@@ -93,9 +96,17 @@ Service implementations take the caller from `CurrentUserProvider` (through `Cal
 
 ## Signing in
 
-The module is a resource server with no login of its own (TR4.2). The role comes only from the token's `role` claim (`STUDENT`, `INSTRUCTOR` or `SCHEDULER`), and the display name from `name`. **The real Core Platform's claim names are still to be confirmed**; they are constants in `SecurityConfig`.
+The API is a resource server: it only checks tokens, and never asks for a password. TR4.2 leaves sign-in to the Core Platform. Until that exists, the `local` profile plays the Core Platform inside the app (team decision); a deployment points at the real one and has none of it. The role comes only from the token's `role` claim (`STUDENT`, `INSTRUCTOR` or `SCHEDULER`), and the display name from `name`. **The real Core Platform's claim names are still to be confirmed**; they are constants in `SecurityConfig`.
 
-In the dev and test profiles, `POST /dev/token` plays the Core Platform. It needs no token, and it does not exist in any other profile.
+The browser signs in with the OpenID Connect authorization-code flow and PKCE (`js/api.js`, `signin-callback.html`), and `GET /auth/config` tells it where. Who plays the Core Platform depends on the profile:
+
+| Profile | Sign-in | Notes |
+|---|---|---|
+| `local` (default for `spring-boot:run`) | The app itself, package `signin`: Spring Authorization Server with a username-and-password form | Accounts (BCrypt) and the signing key are kept in `./data`, so sign-ins survive a restart; issued codes are kept in memory. **Account** in the sidebar changes passwords; administrators manage accounts. Access tokens have `aud` `scheduling-api`, so the ID token cannot call the API |
+| `dev`, `test` | `POST /dev/token` and a test-account picker | No passwords. Does not exist in any other profile |
+| any other | The real Core Platform at `spring.security.oauth2.resourceserver.jwt.issuer-uri` | Refuses to start without it |
+
+In the dev and test profiles, `POST /dev/token` plays the Core Platform. It needs no token.
 
 | `userId` | Account | Role |
 |---|---|---|
@@ -110,7 +121,21 @@ curl localhost:8080/api/subjects -H "Authorization: Bearer <accessToken>"
 
 Tokens last 8 hours but stop working when the app restarts, because the signing key is generated at startup.
 
-Any other profile refuses to start unless `spring.security.oauth2.resourceserver.jwt.issuer-uri` is set.
+Any other profile refuses to start unless two settings are given:
+
+| Setting | Value |
+|---|---|
+| `spring.security.oauth2.resourceserver.jwt.issuer-uri` | the Core Platform issuer |
+| `spring.security.oauth2.resourceserver.jwt.audiences` | the `aud` the Core Platform puts in its access tokens for this API, so tokens issued for other services are refused. Ask the Core Platform team; there is no default. If its tokens carry no `aud`, set `scheduling.auth.require-audience=false` instead |
+
+Two more match how the Core Platform registered this UI, if it differs from the defaults:
+
+| Setting | Default |
+|---|---|
+| `scheduling.auth.client-id` | `scheduling-web` |
+| `scheduling.auth.scope` | `openid profile email` |
+
+The browser gets both from `GET /auth/config`, and the local sign-in registers the UI with the same values.
 
 **Adding an endpoint:** give it `@PreAuthorize` and add a row to `SecurityMatrixIT.ENDPOINTS`. That test fails until you do both. In tests that load the full application, use `@ActiveProfiles("test")`.
 

@@ -6,6 +6,8 @@ const TERM_KEY = 'scheduling.termId';
 const OPEN_SECTION_KEY = 'scheduling.openSection';
 const OIDC_STATE_KEY = 'scheduling.oidc.state';
 const OIDC_VERIFIER_KEY = 'scheduling.oidc.verifier';
+const ID_TOKEN_KEY = 'scheduling.oidc.idToken';
+const PROMPT_LOGIN_KEY = 'scheduling.oidc.promptLogin';
 
 let onSessionEnded = () => {};
 
@@ -45,6 +47,51 @@ export function signOut() {
   sessionStorage.removeItem(OPEN_SECTION_KEY);
   sessionStorage.removeItem(OIDC_STATE_KEY);
   sessionStorage.removeItem(OIDC_VERIFIER_KEY);
+  sessionStorage.removeItem(ID_TOKEN_KEY);
+}
+
+/**
+ * Signs out of this tab and, when the Core Platform has an end-session endpoint, out of the Core Platform too, so the
+ * next sign-in asks for a password (otherwise "Switch account" would sign the same person straight back in).
+ * Navigates away and returns true when it does; returns false when only this tab was signed out. Then the Core
+ * Platform's session is still open, so the next sign-in asks it to prompt for an account anyway (prompt=login).
+ * Without an ID token, logout names the client instead (OpenID Connect RP-initiated logout allows either).
+ */
+export function signOutOfCorePlatform(config) {
+  const idToken = sessionStorage.getItem(ID_TOKEN_KEY);
+  signOut();
+  if (!config || config.mode !== 'oidc') return false;
+  if (!config.logoutUri) {
+    sessionStorage.setItem(PROMPT_LOGIN_KEY, 'true');
+    return false;
+  }
+  const url = new URL(config.logoutUri, location.origin);
+  if (idToken) url.searchParams.set('id_token_hint', idToken);
+  else url.searchParams.set('client_id', config.clientId);
+  url.searchParams.set('post_logout_redirect_uri', `${location.origin}/`);
+  location.assign(url.toString());
+  return true;
+}
+
+/**
+ * Where the Core Platform sends the browser back to: this page's own origin, so the app works however it was opened
+ * (localhost or 127.0.0.1). Sign-in state lives in sessionStorage, which belongs to one origin, so the return address
+ * must be the origin that started the sign-in.
+ */
+function redirectUri() {
+  return `${location.origin}/signin-callback.html`;
+}
+
+/** The Core Platform's address: configured, or this app itself when it signs people in (the local profile). */
+function issuerFor(config) {
+  return (config.issuer || location.origin).replace(/\/$/, '');
+}
+
+/** A plain-language message for the error a Core Platform returns to the callback page (RFC 6749 §4.1.2.1). */
+function signInErrorMessage(error) {
+  if (error === 'access_denied') return 'Sign-in was cancelled.';
+  if (error === 'login_required' || error === 'interaction_required') return 'Please sign in again.';
+  return 'The Core Platform could not complete the sign-in. Please try again, or contact your administrator if it keeps happening.';
 }
 
 /** The term last chosen in this tab, shared by the screens. A screen must check that the user can still see it. */
@@ -118,7 +165,7 @@ export async function signIn(userId) {
  * returned Promise does not resolve in this page: the flow completes on /signin-callback.html.
  */
 export async function startOidcSignIn(config) {
-  if (!config || config.mode !== 'oidc' || !config.issuer) {
+  if (!config || config.mode !== 'oidc') {
     throw new ApiError(0, 'Sign-in is not configured. Contact your administrator.');
   }
   const verifier = randomString(64);
@@ -127,14 +174,18 @@ export async function startOidcSignIn(config) {
   sessionStorage.setItem(OIDC_VERIFIER_KEY, verifier);
 
   const challenge = await s256(verifier);
-  const url = new URL(config.issuer.replace(/\/$/, '') + '/oauth2/authorize');
+  const url = new URL(`${issuerFor(config)}/oauth2/authorize`);
   url.searchParams.set('client_id', config.clientId);
-  url.searchParams.set('redirect_uri', config.redirectUri);
+  url.searchParams.set('redirect_uri', redirectUri());
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', config.scope);
   url.searchParams.set('state', state);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (sessionStorage.getItem(PROMPT_LOGIN_KEY)) {
+    sessionStorage.removeItem(PROMPT_LOGIN_KEY);
+    url.searchParams.set('prompt', 'login'); // after "Switch account": don't reuse the Core Platform's session
+  }
   location.assign(url.toString());
 }
 
@@ -149,7 +200,7 @@ export async function completeOidcSignIn() {
   }
   const params = new URLSearchParams(location.search);
   const error = params.get('error');
-  if (error) throw new ApiError(400, 'Sign-in was cancelled.');
+  if (error) throw new ApiError(400, signInErrorMessage(error));
   const code = params.get('code');
   const state = params.get('state');
   if (!code || !state) throw new ApiError(400, 'Sign-in did not return a code.');
@@ -164,11 +215,11 @@ export async function completeOidcSignIn() {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: config.redirectUri,
+    redirect_uri: redirectUri(),
     client_id: config.clientId,
     code_verifier: verifier,
   });
-  const response = await send(config.issuer.replace(/\/$/, '') + '/oauth2/token', {
+  const response = await send(`${issuerFor(config)}/oauth2/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -177,7 +228,12 @@ export async function completeOidcSignIn() {
     throw new ApiError(response.status, 'The Core Platform did not accept the sign-in. Please try again.');
   }
   const data = await response.json();
+  if (!data.access_token) {
+    throw new ApiError(502, 'The Core Platform did not return a sign-in token. Please try again.');
+  }
   sessionStorage.setItem(TOKEN_KEY, data.access_token);
+  // Kept only to end the Core Platform session on "Switch account".
+  if (data.id_token) sessionStorage.setItem(ID_TOKEN_KEY, data.id_token);
 }
 
 /** A random string of {@code length} characters from the PKCE-unreserved set (RFC 7636 §4.1). */
