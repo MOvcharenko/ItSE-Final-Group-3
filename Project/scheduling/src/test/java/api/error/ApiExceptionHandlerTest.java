@@ -27,6 +27,7 @@ import app.SchedulingApplication;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import security.ProfileSync;
 import security.SecurityConfig;
 import service.BusinessRuleException;
 import service.ConflictingStateException;
@@ -42,6 +43,9 @@ class ApiExceptionHandlerTest {
 
 	@MockitoBean
 	JwtDecoder jwtDecoder;
+
+	@MockitoBean
+	ProfileSync profileSync;
 
 	@Test
 	@DisplayName("NotFoundException becomes 404 problem+json with the message as detail")

@@ -1,0 +1,22 @@
+# Sign in with usernames and passwords through Project/account-service, which plays the Core Platform on port 9000.
+# This module only checks its tokens, exactly as it would the real Core Platform's.
+#   terminal 1:  cd Project/account-service && ./mvnw spring-boot:run
+#   terminal 2:  cd Project/scheduling && ./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts
+#   browser:     http://localhost:8080/
+# Data is kept in ./data, the same database as the default profile.
+
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password: ""
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9000
+          audiences: scheduling-api   # the aud of the access tokens the account service issues
+
+scheduling:
+  auth:
+    account-uri: http://localhost:9000/account   # "Account" link: change password, manage accounts

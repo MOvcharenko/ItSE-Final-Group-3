@@ -17,17 +17,9 @@ You need JDK 21 or newer (`java -version`).
 
 It's ready when the log says `Started SchedulingApplication`. To stop it, press `Ctrl+C` in that terminal.
 
-Open `http://localhost:8080/`. You go straight to the sign-in form:
+Open `http://localhost:8080/` and pick one of the three test accounts: Maya Brooks (Scheduler), L. Bianchi (Instructor) or Jordan Ellis (Student). There are no passwords. **Switch account** returns to the picker. Data is kept in `./data` across restarts; delete that folder to start over.
 
-| Username | Password | Role |
-|---|---|---|
-| `m.brooks` | `Scheduler#2026` | Scheduler (CS, MATH), and account administrator |
-| `l.bianchi` | `Instructor#2026` | Instructor |
-| `j.ellis` | `Student#2026` | Student |
-
-These are demo passwords. **Account** in the sidebar changes your password; Maya can also create, reset and disable accounts there. **Switch account** signs you out. Data, accounts and passwords are kept in `./data` across restarts; delete that folder to start over.
-
-This is the `local` profile, the default for `spring-boot:run`. The app signs people in itself, the way the Core Platform will. To use the API from a terminal with the commands below, start the `dev` profile instead, which has no passwords and an in-memory database:
+This is the `local` profile, the default for `spring-boot:run`. The same test accounts work from a terminal with the API commands below. The `dev` profile is the same with an in-memory database, which restarting empties:
 
 ```powershell
 .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=dev'
@@ -36,6 +28,30 @@ This is the `local` profile, the default for `spring-boot:run`. The app signs pe
 ```sh
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
+
+### Option: sign in with usernames and passwords
+
+Accounts and passwords are not part of this module: they belong to the Core Platform, which `Project/account-service` plays. Start it first, in its own terminal, then this app with the `accounts` profile:
+
+```powershell
+cd ..\account-service; .\mvnw.cmd spring-boot:run          # terminal 1, port 9000
+cd ..\scheduling; .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=accounts'   # terminal 2
+```
+
+```sh
+cd ../account-service && ./mvnw spring-boot:run          # terminal 1, port 9000
+cd ../scheduling && ./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts   # terminal 2
+```
+
+Open `http://localhost:8080/`; it sends you to the account service's sign-in form:
+
+| Username | Password | Role |
+|---|---|---|
+| `m.brooks` | `Scheduler#2026` | Scheduler (CS, MATH), and account administrator |
+| `l.bianchi` | `Instructor#2026` | Instructor |
+| `j.ellis` | `Student#2026` | Student |
+
+These are demo passwords. **Account** in the sidebar opens the account service, where you change your password; Maya can also create, reset and disable accounts there. A new instructor can be assigned to sections once they have signed in. If the account service is not running, the sign-in page says it cannot be reached.
 
 Check that it's running, from a second terminal:
 
@@ -46,11 +62,11 @@ curl.exe http://localhost:8080/actuator/health
 You should see `"status":"UP"`.
 
 - **To use the web UI,** open `http://localhost:8080/` in a browser and sign in as Maya Brooks, the Scheduler. The app starts empty: add subjects and rooms under **Catalog**, then a term and its sections under **Timetable**, and publish the term so that the other accounts can see it.
-- **In the dev profile the database is in memory.** Restarting deletes all data, and old tokens stop working, so get a new one.
+- **Tokens stop working when the app restarts,** so get a new one. In the dev profile the database is in memory too, so restarting also deletes all data.
 
 ## Sign in
 
-These test accounts only exist in the `dev` and `test` profiles:
+These test accounts exist in the `local`, `dev` and `test` profiles:
 
 | `userId` | Account | Role |
 |---|---|---|

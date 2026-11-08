@@ -9,6 +9,7 @@ Lives in `Project/scheduling/`, next to the design material it implements:
 | `Project/Phase 1/` | requirements report | source of FR/NFR/TC ids in test names |
 | `Project/Phase 2/` | original prototype code (kept as the Phase 2 record) | ported to the `domain` package, one class per file, with the fixes from the development plan |
 | `Project/UI Mockup/` | HTML prototype | design reference for the static UI pages |
+| `Project/account-service/` | stand-in Core Platform: accounts, passwords, sign-in (its own app, port 9000) | optional; the `accounts` profile signs in through it. Not part of this module |
 | `src/main/resources/import-templates/` | CSV import templates (moved from `Project/Import Templates/`) | served by `GET /api/import/templates/{type}`; headers pinned by `ImportTemplatesTest` |
 
 ## Prerequisites
@@ -23,16 +24,17 @@ Step-by-step commands, including PowerShell, are in [commands.md](commands.md).
 ```sh
 cd Project/scheduling
 ./mvnw verify                                        # unit tests (*Test) + integration tests (*IT)
-./mvnw spring-boot:run                               # profile "local": built-in sign-in, http://localhost:8080/
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # test-account picker and POST /dev/token, for API work
+./mvnw spring-boot:run                               # profile "local": test-account picker, http://localhost:8080/
+./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts   # sign in with passwords through Project/account-service
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev   # like local, but an in-memory database, for API work
 ```
 
-The local profile keeps its H2 database (PostgreSQL mode) in `./data`; the dev profile's is in memory, with the console at `/h2-console`.
+The local and accounts profiles keep their H2 database (PostgreSQL mode) in `./data`; the dev profile's is in memory. Local and dev have the console at `/h2-console`.
 `GET /actuator/health` and the web UI's own files are open; everything else needs a JWT (see Signing in below).
 
 ## Web UI
 
-Open `http://localhost:8080/` and sign in (`m.brooks` / `Scheduler#2026`; all accounts are in [commands.md](commands.md)). With the dev profile, pick a test account instead. The pages are plain HTML, CSS and JavaScript modules in `src/main/resources/static`, with no build step or framework. `Project/UI Mockup/` is the design reference.
+Open `http://localhost:8080/` and pick a test account. With the accounts profile, sign in at the account service instead (`m.brooks` / `Scheduler#2026`; all accounts are in [commands.md](commands.md)). The pages are plain HTML, CSS and JavaScript modules in `src/main/resources/static`, with no build step or framework. `Project/UI Mockup/` is the design reference.
 
 | File | What it does |
 |---|---|
@@ -52,8 +54,8 @@ Open `http://localhost:8080/` and sign in (`m.brooks` / `Scheduler#2026`; all ac
 | `js/search.js` | The "Search availability" panel on the Bookings screen, for rooms and equipment |
 | `js/teaching.js` | Instructors: My Teaching screen with their assigned sections, workload calculations, interactive weekly availability grid (Open, Prefer, Unavailable), portable equipment checklist, and draft/published term lock |
 
-- **Done:** sign-in (username and password in the local profile, test accounts in the dev profile), the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts, Insights, and Catalog screens, the Instructor's My Teaching (schedule, workload, availability grid, and equipment needs), booking requests and decisions, availability search, timetable availability lens, and CSV import. Publishing asks for confirmation when the term has open High-severity conflicts.
-- **Sign-in:** the local profile signs people in with a username and password itself (see Signing in). A deployment points at the Core Platform instead.
+- **Done:** sign-in (test accounts by default, username and password through the account service), the calendar and notices for all three roles, the Scheduler's Timetable, Conflicts, Insights, and Catalog screens, the Instructor's My Teaching (schedule, workload, availability grid, and equipment needs), booking requests and decisions, availability search, timetable availability lens, and CSV import. Publishing asks for confirmation when the term has open High-severity conflicts.
+- **Sign-in:** this module never signs anyone in with a password and keeps no accounts (see Signing in). Accounts belong to the Core Platform, played by `Project/account-service` until it exists.
 
 The token and the term last chosen are kept in `sessionStorage`, so they end with the browser tab, and each tab can use a different account. Signing out clears both. The role read from the token only chooses what to show; the API still checks every request.
 
@@ -67,7 +69,6 @@ The token and the term last chosen are kept in `sessionStorage`, so they end wit
 | `persistence` | data access | JPA entities + repositories; schema only via Flyway (`src/main/resources/db/migration`) |
 | `integration` | external | `SisClient` + stub; failures degrade |
 | `security` | security | JWT config, `CurrentUserProvider` |
-| `signin` | security | the built-in sign-in, profile `local` only: Spring Authorization Server, accounts, sign-in form and account pages |
 | `app` | entry point | `SchedulingApplication`; lists the packages Spring scans, so **add any new top-level package to `scanBasePackages`** |
 | `domain` | shared | enums and the pure model ported from Phase 2 (no Spring/JPA); JPA entities are separate, in `persistence` |
 
@@ -96,17 +97,35 @@ Service implementations take the caller from `CurrentUserProvider` (through `Cal
 
 ## Signing in
 
-The API is a resource server: it only checks tokens, and never asks for a password. TR4.2 leaves sign-in to the Core Platform. Until that exists, the `local` profile plays the Core Platform inside the app (team decision); a deployment points at the real one and has none of it. The role comes only from the token's `role` claim (`STUDENT`, `INSTRUCTOR` or `SCHEDULER`), and the display name from `name`. **The real Core Platform's claim names are still to be confirmed**; they are constants in `SecurityConfig`.
+The API is a resource server: it only checks tokens, and never asks for a password or keeps an account. TR4.2 leaves sign-in, and managing accounts, to the Core Platform. The role comes only from the token's `role` claim (`STUDENT`, `INSTRUCTOR` or `SCHEDULER`), and the display name from `name`. **The real Core Platform's claim names are still to be confirmed**; they are constants in `SecurityConfig`.
 
-The browser signs in with the OpenID Connect authorization-code flow and PKCE (`js/api.js`, `signin-callback.html`), and `GET /auth/config` tells it where. Who plays the Core Platform depends on the profile:
+Who plays the Core Platform depends on the profile:
 
 | Profile | Sign-in | Notes |
 |---|---|---|
-| `local` (default for `spring-boot:run`) | The app itself, package `signin`: Spring Authorization Server with a username-and-password form | Accounts (BCrypt) and the signing key are kept in `./data`, so sign-ins survive a restart; issued codes are kept in memory. **Account** in the sidebar changes passwords; administrators manage accounts. Access tokens have `aud` `scheduling-api`, so the ID token cannot call the API |
-| `dev`, `test` | `POST /dev/token` and a test-account picker | No passwords. Does not exist in any other profile |
+| `local` (default for `spring-boot:run`) | Test-account picker, `POST /dev/token` behind it | No passwords and no account pages. Data in `./data` |
+| `accounts` | `Project/account-service` on port 9000: usernames and passwords | Start it first (see [its README](../account-service/README.md)). **Account** in the sidebar opens its pages: change password, and for administrators, manage accounts. Data in `./data`, the same database as `local` |
+| `dev`, `test` | Test-account picker, `POST /dev/token` | Like `local`, with an in-memory database |
 | any other | The real Core Platform at `spring.security.oauth2.resourceserver.jwt.issuer-uri` | Refuses to start without it |
 
-In the dev and test profiles, `POST /dev/token` plays the Core Platform. It needs no token.
+With a Core Platform (the `accounts` profile, or a real one), the browser signs in with the OpenID Connect authorization-code flow and PKCE (`js/api.js`, `signin-callback.html`). `GET /auth/config` gives it the sign-in, token and sign-out addresses from the Core Platform's discovery document (`<issuer>/.well-known/openid-configuration`, read by `IssuerDiscovery`), so any standard OpenID Connect provider works and nothing here assumes which product it is. If the Core Platform cannot be reached, `/auth/config` answers 503 and the sign-in page says so.
+
+### What this module reads from a token
+
+| Claim | Used for |
+|---|---|
+| `sub` | the user id; everything this module stores about a person is keyed on it |
+| `role` | `STUDENT`, `INSTRUCTOR` or `SCHEDULER`; any other value grants nothing |
+| `name`, `email` | display name and email in the person's scheduling profile |
+| `departments` | a Scheduler's departments, a list (TR3.4). Without this claim they come from the `scheduler_department` table, which only the test accounts and test data fill |
+| `department` | an instructor's home department |
+| `aud` | must contain the configured audience |
+
+A staff member's scheduling profile (`app_user`) is created or updated from these claims on their requests (`ProfileSync`), so an instructor can be assigned once they have signed in. The three test accounts (same ids in every profile) have profiles from the start (`TestAccountsConfig`). A claim the token leaves out keeps the stored value. Students are never stored.
+
+### Test accounts
+
+In the local, dev and test profiles, `POST /dev/token` plays the Core Platform. It needs no token.
 
 | `userId` | Account | Role |
 |---|---|---|
@@ -121,21 +140,24 @@ curl localhost:8080/api/subjects -H "Authorization: Bearer <accessToken>"
 
 Tokens last 8 hours but stop working when the app restarts, because the signing key is generated at startup.
 
-Any other profile refuses to start unless two settings are given:
+### A real Core Platform
+
+Any profile other than local, dev and test refuses to start unless two settings are given:
 
 | Setting | Value |
 |---|---|
 | `spring.security.oauth2.resourceserver.jwt.issuer-uri` | the Core Platform issuer |
 | `spring.security.oauth2.resourceserver.jwt.audiences` | the `aud` the Core Platform puts in its access tokens for this API, so tokens issued for other services are refused. Ask the Core Platform team; there is no default. If its tokens carry no `aud`, set `scheduling.auth.require-audience=false` instead |
 
-Two more match how the Core Platform registered this UI, if it differs from the defaults:
+Three more match how the Core Platform registered this UI, if they differ from the defaults:
 
 | Setting | Default |
 |---|---|
 | `scheduling.auth.client-id` | `scheduling-web` |
 | `scheduling.auth.scope` | `openid profile email` |
+| `scheduling.auth.account-uri` | blank, so no **Account** link; the Core Platform's page for changing a password |
 
-The browser gets both from `GET /auth/config`, and the local sign-in registers the UI with the same values.
+The Core Platform must allow the UI's sign-in return address `<this app>/signin-callback.html`, its sign-out return address `<this app>/`, and a cross-origin `POST` to its token endpoint from this app's origin. `application-accounts.yml` is a complete example.
 
 **Adding an endpoint:** give it `@PreAuthorize` and add a row to `SecurityMatrixIT.ENDPOINTS`. That test fails until you do both. In tests that load the full application, use `@ActiveProfiles("test")`.
 
@@ -389,7 +411,7 @@ Things worth knowing before you touch it:
 1. **Never edit a migration file that is already on `main`.** Flyway remembers a checksum of each file, and the app refuses to start if one has changed. Until your branch is merged you may edit your own new file freely.
 2. **Every change is a new file** `V2__what_it_does.sql`, `V3__...`. Use plain numbers (not dates), because the tests sort files by that number.
 3. **If two people create the same version number,** the one who merges second renumbers their file.
-4. **No test or demo data in migrations.** Migrations also run in production. Put sample data in the dev/test loader (`Td1Loader`, or a `@Profile("dev")` runner). Remember that a Scheduler needs a row in `scheduler_department`, or every department check fails.
+4. **No test or demo data in migrations.** Migrations also run in production. Put sample data in the dev/test loader (`Td1Loader`, or a `@Profile("dev")` runner). Remember that a Scheduler signed in through `/dev/token` needs a row in `scheduler_department`, or every department check fails.
 5. Keep the SQL working on both **PostgreSQL** and **H2 in PostgreSQL mode** (so, no vendor-only features).
 
 ### Looking at the database

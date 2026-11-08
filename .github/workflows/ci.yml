@@ -9,9 +9,14 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The scheduling module, and the account service that plays the Core Platform (a separate app)
+        project: [Project/scheduling, Project/account-service]
     defaults:
       run:
-        working-directory: Project/scheduling
+        working-directory: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -19,6 +24,6 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-          cache-dependency-path: Project/scheduling/pom.xml
+          cache-dependency-path: ${{ matrix.project }}/pom.xml
       - name: Build and test (unit + integration)
         run: ./mvnw -B verify

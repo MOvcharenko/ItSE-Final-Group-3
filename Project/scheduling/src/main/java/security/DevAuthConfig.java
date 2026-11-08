@@ -27,10 +27,11 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 
 /**
  * Plays the Core Platform locally (TP3): signs tokens with a key generated at startup, so no secret is
- * committed and tokens stop working after a restart. Never active outside the dev and test profiles.
+ * committed and tokens stop working after a restart. Only in the local (the default for spring-boot:run), dev
+ * and test profiles: any other profile needs a real issuer ({@link IssuerRequiredConfig}).
  */
 @Configuration
-@Profile({ "dev", "test" })
+@Profile({ "local", "dev", "test" })
 public class DevAuthConfig {
 
 	static final String ISSUER = "https://core-platform.dev.local";

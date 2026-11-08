@@ -1,26 +1,22 @@
-package signin;
+package accounts;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import domain.Role;
-
 /** Account changes: password change, and the administrator's create, reset and enable/disable. */
 @Service
-@Profile("local")
 public class AccountService {
 
 	static final int MIN_PASSWORD_LENGTH = 10;
-	/** The longest name the account's scheduling profile (app_user.display_name) holds. */
+	/** The longest name the scheduling module's profiles (app_user.display_name) hold. */
 	static final int MAX_NAME_LENGTH = 150;
-	/** The longest home department app_user.department holds. */
+	/** The longest department the scheduling module's profiles (app_user.department) hold. */
 	static final int MAX_DEPARTMENT_LENGTH = 100;
 
 	private final AccountStore accounts;

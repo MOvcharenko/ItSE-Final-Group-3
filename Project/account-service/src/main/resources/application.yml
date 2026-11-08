@@ -1,0 +1,60 @@
+# Stand-in Core Platform for the Academic Scheduling module: accounts and sign-in.
+#   cd Project/account-service && ./mvnw spring-boot:run      → http://localhost:9000/
+# Accounts and the signing key are kept in ./data (git-ignored); delete it to start over.
+
+server:
+  port: 9000
+  servlet:
+    session:
+      # Browsers share cookies between ports of the same host, so a distinct name keeps this sign-in session apart
+      # from anything the scheduling app on localhost:8080 sets.
+      cookie:
+        name: ACCOUNTS_SESSION
+
+spring:
+  application:
+    name: account-service
+  datasource:
+    url: jdbc:h2:file:./data/accounts
+    username: sa
+    password: ""
+
+accounts:
+  issuer: http://localhost:9000
+  # Where the Academic Scheduling UI is opened: sign-in returns there, and its token request is allowed from there.
+  app-urls:
+    - http://localhost:8080
+    - http://127.0.0.1:8080
+  # How the scheduling UI identifies itself, and the audience the scheduling API accepts; must match its
+  # scheduling.auth.client-id / scheduling.auth.scope and spring.security.oauth2.resourceserver.jwt.audiences.
+  client-id: scheduling-web
+  scope: openid profile email
+  api-audience: scheduling-api
+  # The scheduling UI has no refresh: after this it asks to sign in again (straight through while this session lasts).
+  # A disabled account cannot sign in again, and loses a token it already holds when that token expires.
+  access-token-ttl: 1h
+  signing-key-file: ./data/signing-key.json
+  # Created on first start only. Passwords are BCrypt hashes of the demo passwords in the README; change them under
+  # Account → Change password.
+  seed-accounts:
+    - id: U01
+      username: m.brooks
+      name: Maya Brooks
+      email: m.brooks@univ.edu
+      role: SCHEDULER
+      admin: true
+      departments: [CS, MATH]
+      password: "{bcrypt}$2a$10$bXUyfqfQ3HQGre2f6xHKe.KJsGBWODb0UPA7zT/ycuIozzIu2TusO"
+    - id: U02
+      username: l.bianchi
+      name: L. Bianchi
+      email: l.bianchi@univ.edu
+      role: INSTRUCTOR
+      home-department: MATH
+      password: "{bcrypt}$2a$10$LomPiTuk.mr/vYoek/F8Y.zUkWoZegJnaFHvHeF7tI/M5IBqgKefS"
+    - id: U03
+      username: j.ellis
+      name: Jordan Ellis
+      email: j.ellis@univ.edu
+      role: STUDENT
+      password: "{bcrypt}$2a$10$axS9c1qBJF8XvBIwmkJCceFI9LpWlibDnu8QPnbK3znAR3fYcePDu"

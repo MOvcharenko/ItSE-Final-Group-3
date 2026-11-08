@@ -1,10 +1,14 @@
-package signin;
+package accounts;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,33 +29,36 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.jayway.jsonpath.JsonPath;
+import com.nimbusds.jose.crypto.RSASSAVerifier;
+import com.nimbusds.jose.jwk.JWKMatcher;
+import com.nimbusds.jose.jwk.JWKSelector;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 
-import app.SchedulingApplication;
-import persistence.AppUserEntity;
-import persistence.AppUserRepository;
-
 /**
- * The built-in sign-in (profile local), as the browser runs it: the sign-in form, authorization code with PKCE, the
- * token exchange, then the API with that token; and the account pages. Tests that change an account make their own,
- * so they do not depend on each other.
+ * The sign-in server as the Academic Scheduling UI uses it: the sign-in form, authorization code with PKCE, the
+ * cross-origin token exchange, and the claims the scheduling module reads; then the account pages. Tests that change
+ * an account make their own, so they do not depend on each other.
  */
-@SpringBootTest(classes = SchedulingApplication.class, properties = {
-		"spring.datasource.url=jdbc:h2:mem:local-signin;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-		"scheduling.signin.signing-key-file=${java.io.tmpdir}/scheduling-signin-test-${random.uuid}/signing-key.json" })
+@SpringBootTest(properties = {
+		"spring.datasource.url=jdbc:h2:mem:accounts-test",
+		"accounts.signing-key-file=${java.io.tmpdir}/account-service-test-${random.uuid}/signing-key.json" })
 @AutoConfigureMockMvc
-@ActiveProfiles("local")
-class LocalSignInIT {
+class SignInIT {
 
-	private static final String CLIENT = "scheduling-web"; // scheduling.auth.client-id's default
-	private static final String REDIRECT = "http://localhost:8080/signin-callback.html";
+	private static final String ISSUER = "http://localhost:9000";
+	private static final String CLIENT = "scheduling-web";
+	private static final String APP = "http://localhost:8080";
+	private static final String REDIRECT = APP + "/signin-callback.html";
 
 	@Autowired
 	MockMvc mvc;
@@ -63,21 +70,48 @@ class LocalSignInIT {
 	AccountStore accounts;
 
 	@Autowired
-	AppUserRepository users;
+	RegisteredClientRepository clients;
 
-	// --- sign-in and tokens -----------------------------------------------
+	@Autowired
+	JWKSource<SecurityContext> keys;
+
+	// --- what the scheduling module and its UI are given ------------------
 
 	@Test
-	@DisplayName("The browser is told to sign in here, with the logout and account pages")
-	void authConfig() throws Exception {
-		mvc.perform(get("/auth/config"))
-				.andExpect(jsonPath("$.mode").value("oidc"))
-				.andExpect(jsonPath("$.issuer").value(""))
-				.andExpect(jsonPath("$.clientId").value(CLIENT))
-				.andExpect(jsonPath("$.scope").value("openid profile email"))
-				.andExpect(jsonPath("$.logoutUri").value("/connect/logout"))
-				.andExpect(jsonPath("$.accountUri").value("/account"));
+	@DisplayName("The discovery document names the fixed issuer and the endpoints the scheduling module hands its UI")
+	void discovery() throws Exception {
+		mvc.perform(get("/.well-known/openid-configuration"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.issuer").value(ISSUER))
+				.andExpect(jsonPath("$.authorization_endpoint").value(ISSUER + "/oauth2/authorize"))
+				.andExpect(jsonPath("$.token_endpoint").value(ISSUER + "/oauth2/token"))
+				.andExpect(jsonPath("$.end_session_endpoint").value(ISSUER + "/connect/logout"))
+				.andExpect(jsonPath("$.jwks_uri").value(ISSUER + "/oauth2/jwks"));
 	}
+
+	@Test
+	@DisplayName("The scheduling UI is registered with its sign-in and sign-out return addresses from accounts.app-urls")
+	void registration() {
+		RegisteredClient client = clients.findByClientId(CLIENT);
+		assertThat(client.getRedirectUris()).containsExactlyInAnyOrder(
+				"http://localhost:8080/signin-callback.html", "http://127.0.0.1:8080/signin-callback.html");
+		assertThat(client.getPostLogoutRedirectUris()).containsExactlyInAnyOrder(
+				"http://localhost:8080/", "http://127.0.0.1:8080/");
+		assertThat(client.getScopes()).containsExactlyInAnyOrder("openid", "profile", "email");
+	}
+
+	@Test
+	@DisplayName("The UI may call the token endpoint from its own origin, and no other origin may")
+	void cors() throws Exception {
+		mvc.perform(options("/oauth2/token").header("Origin", APP).header("Access-Control-Request-Method", "POST")
+						.header("Access-Control-Request-Headers", "Content-Type"))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Access-Control-Allow-Origin", APP));
+		mvc.perform(options("/oauth2/token").header("Origin", "http://evil.example").header("Access-Control-Request-Method", "POST"))
+				.andExpect(status().isForbidden());
+	}
+
+	// --- sign-in and tokens -----------------------------------------------
 
 	@Test
 	@DisplayName("The sign-in form opens without a token; authorizing without signing in leads to it")
@@ -94,31 +128,39 @@ class LocalSignInIT {
 	}
 
 	@Test
-	@DisplayName("Signing in gives an access token for the API with sub, name, role and audience")
-	void accessToken() throws Exception {
-		String verifier = verifier();
-		String body = exchange(authorize(signIn("m.brooks", "Scheduler#2026"), challenge(verifier)), verifier);
-		String token = JsonPath.read(body, "$.access_token");
-
-		JWTClaimsSet claims = SignedJWT.parse(token).getJWTClaimsSet();
+	@DisplayName("A scheduler's access token is signed by this server, for the API, with sub, name, role and departments")
+	void schedulerToken() throws Exception {
+		JWTClaimsSet claims = verified(accessToken("m.brooks", "Scheduler#2026"));
+		assertThat(claims.getIssuer()).isEqualTo(ISSUER);
 		assertThat(claims.getSubject()).isEqualTo("U01");
 		assertThat(claims.getAudience()).containsExactly("scheduling-api");
 		assertThat(claims.getStringClaim("name")).isEqualTo("Maya Brooks");
 		assertThat(claims.getStringClaim("role")).isEqualTo("SCHEDULER");
-		assertThat(claims.getClaims()).doesNotContainKey("departments");
-
-		mvc.perform(get("/api/terms").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+		assertThat(claims.getStringListClaim("departments")).containsExactlyInAnyOrder("CS", "MATH");
+		assertThat(claims.getClaims()).doesNotContainKey("department");
 	}
 
 	@Test
-	@DisplayName("The ID token is addressed to the client, so the API refuses it")
-	void idTokenRefusedByApi() throws Exception {
+	@DisplayName("An instructor's token carries the home department and no departments to manage; a student's carries neither")
+	void instructorAndStudentTokens() throws Exception {
+		JWTClaimsSet instructor = verified(accessToken("l.bianchi", "Instructor#2026"));
+		assertThat(instructor.getStringClaim("role")).isEqualTo("INSTRUCTOR");
+		assertThat(instructor.getStringClaim("department")).isEqualTo("MATH");
+		assertThat(instructor.getClaims()).doesNotContainKey("departments");
+
+		JWTClaimsSet student = verified(accessToken("j.ellis", "Student#2026"));
+		assertThat(student.getStringClaim("role")).isEqualTo("STUDENT");
+		assertThat(student.getClaims()).doesNotContainKeys("department", "departments");
+	}
+
+	@Test
+	@DisplayName("The ID token is addressed to the client, not the API, so the scheduling module refuses it")
+	void idTokenIsForTheClient() throws Exception {
 		String verifier = verifier();
 		String body = exchange(authorize(signIn("l.bianchi", "Instructor#2026"), challenge(verifier)), verifier);
 		String idToken = JsonPath.read(body, "$.id_token");
 
-		assertThat(SignedJWT.parse(idToken).getJWTClaimsSet().getAudience()).containsExactly(CLIENT);
-		mvc.perform(get("/api/terms").header("Authorization", "Bearer " + idToken)).andExpect(status().isUnauthorized());
+		assertThat(verified(idToken).getAudience()).containsExactly(CLIENT);
 	}
 
 	@Test
@@ -140,9 +182,9 @@ class LocalSignInIT {
 
 		URI logout = UriComponentsBuilder.fromPath("/connect/logout")
 				.queryParam("id_token_hint", idToken)
-				.queryParam("post_logout_redirect_uri", "http://localhost:8080/")
+				.queryParam("post_logout_redirect_uri", APP + "/")
 				.encode().build().toUri();
-		mvc.perform(get(logout).session(session)).andExpect(redirectedUrl("http://localhost:8080/"));
+		mvc.perform(get(logout).session(session)).andExpect(redirectedUrl(APP + "/"));
 
 		mvc.perform(get(authorizeUrl("s", challenge(verifier()))).session(session).accept(MediaType.TEXT_HTML))
 				.andExpect(redirectedUrl("/login"));
@@ -154,9 +196,9 @@ class LocalSignInIT {
 		MockHttpSession session = signIn("m.brooks", "Scheduler#2026");
 		URI logout = UriComponentsBuilder.fromPath("/connect/logout")
 				.queryParam("id_token_hint", "issued-before-a-restart")
-				.queryParam("post_logout_redirect_uri", "http://localhost:8080/")
+				.queryParam("post_logout_redirect_uri", APP + "/")
 				.encode().build().toUri();
-		mvc.perform(get(logout).session(session)).andExpect(redirectedUrl("/"));
+		mvc.perform(get(logout).session(session)).andExpect(redirectedUrl(APP + "/"));
 		assertThat(session.isInvalid()).isTrue();
 	}
 
@@ -166,7 +208,7 @@ class LocalSignInIT {
 		MockHttpSession session = signIn("m.brooks", "Scheduler#2026");
 		URI logout = UriComponentsBuilder.fromPath("/connect/logout")
 				.queryParam("client_id", CLIENT)
-				.queryParam("post_logout_redirect_uri", "http://localhost:8080/")
+				.queryParam("post_logout_redirect_uri", APP + "/")
 				.encode().build().toUri();
 		mvc.perform(get(logout).session(session)).andExpect(status().is3xxRedirection());
 		assertThat(session.isInvalid()).isTrue();
@@ -177,34 +219,25 @@ class LocalSignInIT {
 	// --- accounts -----------------------------------------------------------
 
 	@Test
-	@DisplayName("First start creates the demo accounts, with hashed passwords, staff profiles and Maya's departments")
+	@DisplayName("First start creates the demo accounts, with hashed passwords, Maya's departments and Bianchi's home department")
 	void seeded() {
 		assertThat(accounts.all()).extracting(Account::id).contains("U01", "U02", "U03");
-		assertThat(accounts.byId("U01").orElseThrow().password()).startsWith("{bcrypt}");
-		assertThat(accounts.byId("U01").orElseThrow().admin()).isTrue();
-		assertThat(users.findAuthorizedDepartments("U01")).containsExactlyInAnyOrder("CS", "MATH");
-		assertThat(users.findById("U02")).map(AppUserEntity::getDisplayName).contains("L. Bianchi");
-		// the same home department as the dev and test profiles give her
-		assertThat(users.findById("U02")).map(AppUserEntity::getDepartment).contains("MATH");
+		Account maya = accounts.byId("U01").orElseThrow();
+		assertThat(maya.password()).startsWith("{bcrypt}");
+		assertThat(maya.admin()).isTrue();
+		assertThat(maya.departments()).containsExactlyInAnyOrder("CS", "MATH");
+		assertThat(maya.homeDepartment()).isNull();
 		assertThat(accounts.byId("U02").orElseThrow().homeDepartment()).isEqualTo("MATH");
-		assertThat(users.findById("U01")).map(AppUserEntity::getDepartment).isEmpty();
-		// students are not stored, so Jordan Ellis is never offered as an instructor
-		assertThat(users.findById("U03")).isEmpty();
+		assertThat(accounts.byId("U03").orElseThrow().departments()).isEmpty();
 	}
 
 	@Test
-	@DisplayName("A student created by an administrator signs in, gets no scheduling profile, and is not listed as an instructor")
-	void studentHasNoProfile() throws Exception {
-		String username = newAccount("STUDENT", false, "first-password");
-		String id = accounts.byUsername(username).orElseThrow().id();
-		assertThat(users.findById(id)).isEmpty();
-
-		String verifier = verifier();
-		String token = JsonPath.read(exchange(authorize(signIn("m.brooks", "Scheduler#2026"), challenge(verifier)), verifier),
-				"$.access_token");
-		String instructors = mvc.perform(get("/api/instructors").header("Authorization", "Bearer " + token))
-				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-		assertThat(instructors).doesNotContain(id).doesNotContain("Jordan Ellis");
+	@DisplayName("This server's own address opens the account page, which links back to Academic Scheduling")
+	void homeAndBackLink() throws Exception {
+		mvc.perform(get("/")).andExpect(redirectedUrl("/account"));
+		mvc.perform(get("/account").session(signIn("l.bianchi", "Instructor#2026")))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("href=\"" + APP + "/\"")));
 	}
 
 	@Test
@@ -238,7 +271,7 @@ class LocalSignInIT {
 	}
 
 	@Test
-	@DisplayName("An administrator creates a scheduler, who can then sign in and manage their departments")
+	@DisplayName("An administrator creates a scheduler, who signs in with their departments in the token")
 	void createAccount() throws Exception {
 		String id = "T" + UUID.randomUUID().toString().substring(0, 8);
 		mvc.perform(post("/admin/accounts").session(signIn("m.brooks", "Scheduler#2026")).with(csrf())
@@ -250,13 +283,13 @@ class LocalSignInIT {
 		Account created = accounts.byId(id).orElseThrow();
 		assertThat(created.departments()).containsExactlyInAnyOrder("CS", "PHYS");
 		assertThat(created.password()).startsWith("{bcrypt}").doesNotContain("first-password");
-		// the list the API checks, not a copy of it
-		assertThat(users.findAuthorizedDepartments(id)).containsExactlyInAnyOrder("CS", "PHYS");
-		signIn(id.toLowerCase(), "first-password");
+		JWTClaimsSet claims = verified(accessToken(id.toLowerCase(), "first-password"));
+		assertThat(claims.getSubject()).isEqualTo(id);
+		assertThat(claims.getStringListClaim("departments")).containsExactlyInAnyOrder("CS", "PHYS");
 	}
 
 	@Test
-	@DisplayName("An instructor's home department reaches their scheduling profile; a scheduler's is ignored")
+	@DisplayName("An instructor's home department is kept; a scheduler's is ignored")
 	void homeDepartment() throws Exception {
 		MockHttpSession admin = signIn("m.brooks", "Scheduler#2026");
 		String instructor = "T" + UUID.randomUUID().toString().substring(0, 8);
@@ -269,13 +302,12 @@ class LocalSignInIT {
 					.andExpect(flash().attribute("message", "Account " + account[0] + " created."));
 		}
 
-		assertThat(users.findById(instructor)).map(AppUserEntity::getDepartment).contains("PHYS");
 		assertThat(accounts.byId(instructor).orElseThrow().homeDepartment()).isEqualTo("PHYS");
-		assertThat(users.findById(scheduler)).map(AppUserEntity::getDepartment).isEmpty();
+		assertThat(accounts.byId(scheduler).orElseThrow().homeDepartment()).isNull();
 	}
 
 	@Test
-	@DisplayName("A name longer than the scheduling profile holds is refused")
+	@DisplayName("A name longer than the scheduling module's profiles hold is refused")
 	void nameTooLong() throws Exception {
 		mvc.perform(post("/admin/accounts").session(signIn("m.brooks", "Scheduler#2026")).with(csrf())
 						.param("id", "X3").param("username", "x3").param("name", "N".repeat(151)).param("role", "STUDENT")
@@ -309,22 +341,17 @@ class LocalSignInIT {
 	}
 
 	@Test
-	@DisplayName("Disabling a signed-in account stops it at once: its token, its sign-in session and its account pages")
+	@DisplayName("Disabling a signed-in account stops it at once: its sign-in session hands out no more tokens, and its account pages close")
 	void disableWhileSignedIn() throws Exception {
 		String username = newAccount("INSTRUCTOR", true, "first-password");
 		String id = accounts.byUsername(username).orElseThrow().id();
 		MockHttpSession session = signIn(username, "first-password");
 		MockHttpSession adminPages = signIn(username, "first-password");
-		String verifier = verifier();
-		String token = JsonPath.read(exchange(authorize(session, challenge(verifier)), verifier), "$.access_token");
-		mvc.perform(get("/api/terms").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
 		mvc.perform(get("/admin/accounts").session(adminPages)).andExpect(status().isOk());
 
 		mvc.perform(post("/admin/accounts/" + id + "/enabled").session(signIn("m.brooks", "Scheduler#2026")).with(csrf())
 				.param("enabled", "false"));
 
-		mvc.perform(get("/api/terms").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
-		// the open session no longer hands out codes, and the disabled administrator loses the admin pages
 		mvc.perform(get(authorizeUrl("st", challenge(verifier()))).session(session).accept(MediaType.TEXT_HTML))
 				.andExpect(redirectedUrl("/login"));
 		mvc.perform(get("/admin/accounts").session(adminPages)).andExpect(redirectedUrl("/login"));
@@ -394,6 +421,21 @@ class LocalSignInIT {
 						.param("id", id).param("username", username).param("name", "X").param("role", role)
 						.param("password", "long-enough-1").param("confirmation", "long-enough-1"))
 				.andExpect(flash().attribute("error", error));
+	}
+
+	/** Signs in, then runs the browser's authorization-code flow; returns the access token. */
+	private String accessToken(String username, String password) throws Exception {
+		String verifier = verifier();
+		return JsonPath.read(exchange(authorize(signIn(username, password), challenge(verifier)), verifier), "$.access_token");
+	}
+
+	/** The token's claims, after checking it is signed with this server's key, as the scheduling module checks it. */
+	private JWTClaimsSet verified(String token) throws Exception {
+		SignedJWT jwt = SignedJWT.parse(token);
+		RSAKey key = (RSAKey) keys.get(new JWKSelector(new JWKMatcher.Builder().keyID(jwt.getHeader().getKeyID()).build()), null)
+				.get(0);
+		assertThat(jwt.verify(new RSASSAVerifier(key))).isTrue();
+		return jwt.getJWTClaimsSet();
 	}
 
 	private String authorize(MockHttpSession session, String challenge) throws Exception {

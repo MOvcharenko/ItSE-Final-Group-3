@@ -1,4 +1,4 @@
-package signin;
+package accounts;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -6,36 +6,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import domain.Role;
-import persistence.AppUserEntity;
-import persistence.AppUserRepository;
-
-/**
- * The signin_account table. Passwords arrive here already encoded. A scheduler's departments and an instructor's home
- * department are the module's own profile rows (scheduler_department, app_user), so they are kept in one place only.
- */
+/** The signin_account and account_department tables. Passwords arrive here already encoded. */
 @Repository
-@Profile("local")
 public class AccountStore {
 
 	private static final String SELECT = """
-			select a.id, a.username, a.password, a.name, a.email, a.role, a.admin, a.enabled, d.department,
-			       u.department as home_department
-			from signin_account a left join app_user u on u.id = a.id
-			left join scheduler_department d on d.scheduler_id = a.id
+			select a.id, a.username, a.password, a.name, a.email, a.role, a.admin, a.enabled, a.home_department,
+			       d.department
+			from signin_account a left join account_department d on d.account_id = a.id
 			""";
 
 	private final JdbcClient jdbc;
-	private final AppUserRepository users;
 
-	public AccountStore(JdbcClient jdbc, AppUserRepository users) {
+	public AccountStore(JdbcClient jdbc) {
 		this.jdbc = jdbc;
-		this.users = users;
 	}
 
 	public Optional<Account> byUsername(String username) {
@@ -47,7 +35,7 @@ public class AccountStore {
 	}
 
 	public List<Account> all() {
-		return query(SELECT + " order by a.id", null);
+		return query(SELECT + " order by a.id, d.department", null);
 	}
 
 	public long count() {
@@ -63,15 +51,11 @@ public class AccountStore {
 		return jdbc.sql("select count(*) from signin_account where id = :id").param("id", id).query(Long.class).single() > 0;
 	}
 
-	/**
-	 * Also creates a scheduler's or instructor's scheduling profile (app_user) if missing, and grants a scheduler's
-	 * departments. Students get none: the SIS owns them (TR1.3), and every profile is offered as an instructor.
-	 */
 	@Transactional
 	public void create(Account account) {
 		jdbc.sql("""
-				insert into signin_account (id, username, password, name, email, role, admin, enabled)
-				values (:id, :username, :password, :name, :email, :role, :admin, :enabled)
+				insert into signin_account (id, username, password, name, email, role, home_department, admin, enabled)
+				values (:id, :username, :password, :name, :email, :role, :home, :admin, :enabled)
 				""")
 				.param("id", account.id())
 				.param("username", account.username())
@@ -79,17 +63,16 @@ public class AccountStore {
 				.param("name", account.name())
 				.param("email", account.email())
 				.param("role", account.role().name())
+				.param("home", account.homeDepartment())
 				.param("admin", account.admin())
 				.param("enabled", account.enabled())
 				.update();
-		if (account.role() == Role.STUDENT) {
-			return;
+		for (String department : account.departments()) {
+			jdbc.sql("insert into account_department (account_id, department) values (:id, :department)")
+					.param("id", account.id())
+					.param("department", department)
+					.update();
 		}
-		AppUserEntity profile = users.findById(account.id())
-				.orElseGet(() -> new AppUserEntity(account.id(), account.name(), account.email(), account.homeDepartment()));
-		account.departments().forEach(profile::authorizeDepartment);
-		// flushed now, so this transaction's own reads above (plain SQL) see the departments
-		users.saveAndFlush(profile);
 	}
 
 	public void updatePassword(String id, String encodedPassword) {

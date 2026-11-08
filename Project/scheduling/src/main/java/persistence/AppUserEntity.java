@@ -55,6 +55,13 @@ public class AppUserEntity extends AssignedIdEntity {
 		return department;
 	}
 
+	/** Takes the name, email and home department the Core Platform now has for this person (security.ProfileSync). */
+	public void updateProfile(String displayName, String email, String department) {
+		this.displayName = displayName;
+		this.email = email;
+		this.department = department;
+	}
+
 	public void authorizeDepartment(String authorizedDepartment) {
 		authorizedDepartments.add(authorizedDepartment);
 	}

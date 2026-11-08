@@ -10,11 +10,13 @@ import persistence.AppUserEntity;
 import persistence.AppUserRepository;
 
 /**
- * Profiles for the TP3 staff accounts that sign in through /dev/token. The built-in sign-in (local) creates its own
- * accounts' profiles. Students are not stored here: the SIS owns them (TR1.3).
+ * Profiles for the TP3 staff accounts, so a Scheduler can assign Bianchi before she has ever signed in. They sign in
+ * through /dev/token, or in the accounts profile through Project/account-service, which has the same ids. Anyone else
+ * gets a profile on their first request ({@link ProfileSyncFilter}). Students are not stored here: the SIS owns them
+ * (TR1.3).
  */
 @Configuration
-@Profile({ "dev", "test" })
+@Profile({ "local", "dev", "test", "accounts" })
 public class TestAccountsConfig {
 
 	@Bean

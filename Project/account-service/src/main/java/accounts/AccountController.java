@@ -1,32 +1,43 @@
-package signin;
+package accounts;
 
 import java.security.Principal;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
-
-import domain.Role;
 
 /**
  * The sign-in form and the account pages: account details, change password (everyone), and account management
  * (administrators). Each change redirects back with a message, so a refresh never repeats it.
  */
 @Controller
-@Profile("local")
 public class AccountController {
 
 	private final AccountStore accounts;
 	private final AccountService service;
+	private final AccountsProperties properties;
 
-	public AccountController(AccountStore accounts, AccountService service) {
+	public AccountController(AccountStore accounts, AccountService service, AccountsProperties properties) {
 		this.accounts = accounts;
 		this.service = service;
+		this.properties = properties;
+	}
+
+	/** The pages' "Back to the app" link: Academic Scheduling runs elsewhere. */
+	@ModelAttribute("appHome")
+	public String appHome() {
+		return properties.appHome();
+	}
+
+	/** Opening this server's address shows the signed-in person's account (or the sign-in form first). */
+	@GetMapping("/")
+	public String home() {
+		return "redirect:/account";
 	}
 
 	@GetMapping("/login")

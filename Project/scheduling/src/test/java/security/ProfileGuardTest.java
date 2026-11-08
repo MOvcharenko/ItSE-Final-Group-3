@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.web.server.ResponseStatusException;
 
 import app.SchedulingApplication;
 import service.BookingService;
@@ -28,6 +29,11 @@ class ProfileGuardTest {
 		return new SpringApplicationBuilder(SchedulingApplication.class, MockedServices.class).properties(
 				"server.port=0",
 				"spring.datasource.url=jdbc:h2:mem:guard;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH");
+	}
+
+	/** As a command-line argument, so it wins over the profile's own file database in ./data. */
+	private static String inMemoryDatabase(String name) {
+		return "--spring.datasource.url=jdbc:h2:mem:" + name + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH";
 	}
 
 	@Test
@@ -56,6 +62,30 @@ class ProfileGuardTest {
 			assertThat(context.getBeansOfType(JwtDecoder.class)).hasSize(1);
 			assertThat(context.getBeansOfType(DevTokenController.class)).isEmpty();
 			assertThat(context.getBeansOfType(DevAuthConfig.class)).isEmpty();
+			// the browser is told why it cannot sign in, rather than sent to a dead address
+			assertThatThrownBy(() -> context.getBean(AuthConfigController.class).config())
+				.isInstanceOf(ResponseStatusException.class).hasMessageContaining("cannot be reached");
+		}
+	}
+
+	@Test
+	@DisplayName("The local profile (the default for spring-boot:run) is the test-account picker, with no account management")
+	void localProfileIsThePicker() {
+		try (ConfigurableApplicationContext context = defaultProfileApp().profiles("local").run(inMemoryDatabase("guard-local"))) {
+			assertThat(context.getBeansOfType(DevTokenController.class)).hasSize(1);
+			assertThat(context.getBean(AuthConfigController.class).config()).containsEntry("mode", "dev");
+			assertThat(context.containsBean("accountController")).isFalse();
+		}
+	}
+
+	@Test
+	@DisplayName("The accounts profile trusts Project/account-service as its Core Platform, and has no dev login")
+	void accountsProfileTrustsTheAccountService() {
+		try (ConfigurableApplicationContext context = defaultProfileApp().profiles("accounts").run(inMemoryDatabase("guard-accounts"))) {
+			assertThat(context.getEnvironment().getProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri"))
+				.isEqualTo("http://localhost:9000");
+			assertThat(context.getBeansOfType(JwtDecoder.class)).hasSize(1);
+			assertThat(context.getBeansOfType(DevTokenController.class)).isEmpty();
 		}
 	}
 

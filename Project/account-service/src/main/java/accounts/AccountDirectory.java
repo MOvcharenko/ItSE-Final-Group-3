@@ -1,6 +1,5 @@
-package signin;
+package accounts;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -13,7 +12,6 @@ import org.springframework.stereotype.Component;
  * token's {@code sub} with the principal, keeps working). A disabled account cannot sign in.
  */
 @Component
-@Profile("local")
 public class AccountDirectory implements UserDetailsService {
 
 	static final String ADMIN = "ADMIN";

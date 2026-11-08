@@ -10,7 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * JPA entities and repositories are looked up in {@code persistence}.
  */
 @SpringBootApplication(scanBasePackages = {
-		"api", "config", "core", "domain", "integration", "persistence", "security", "service", "signin" })
+		"api", "config", "core", "domain", "integration", "persistence", "security", "service" })
 @AutoConfigurationPackage(basePackages = "persistence")
 public class SchedulingApplication {
 

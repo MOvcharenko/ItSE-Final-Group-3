@@ -1,0 +1,4 @@
+/mvnw text eol=lf
+*.cmd text eol=crlf
+# Import files and test data keep LF everywhere, so tests that check exact lines pass on Windows too
+*.csv text eol=lf

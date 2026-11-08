@@ -7,13 +7,12 @@
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" th:href="@{/css/app.css}">
-<link rel="stylesheet" th:href="@{/css/signin.css}">
+<link rel="stylesheet" th:href="@{/css/accounts.css}">
 </head>
 <body>
 <nav class="account-nav" th:fragment="nav(account, current)" aria-label="Account">
   <span class="title">Academic Scheduling · Account</span>
-  <a th:href="@{/}">← Back to the app</a>
+  <a th:href="${appHome}">← Back to Academic Scheduling</a>
   <a th:href="@{/account}" th:attr="aria-current=${current == 'account'} ? 'page' : null">Details</a>
   <a th:href="@{/account/password}" th:attr="aria-current=${current == 'password'} ? 'page' : null">Change password</a>
   <a th:if="${account.admin}" th:href="@{/admin/accounts}" th:attr="aria-current=${current == 'accounts'} ? 'page' : null">Manage accounts</a>

@@ -82,11 +82,6 @@ function redirectUri() {
   return `${location.origin}/signin-callback.html`;
 }
 
-/** The Core Platform's address: configured, or this app itself when it signs people in (the local profile). */
-function issuerFor(config) {
-  return (config.issuer || location.origin).replace(/\/$/, '');
-}
-
 /** A plain-language message for the error a Core Platform returns to the callback page (RFC 6749 §4.1.2.1). */
 function signInErrorMessage(error) {
   if (error === 'access_denied') return 'Sign-in was cancelled.';
@@ -127,9 +122,11 @@ let authConfigPromise = null;
 export async function getAuthConfig() {
   if (!authConfigPromise) {
     authConfigPromise = fetch('/auth/config')
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) {
-          throw new ApiError(response.status, 'Could not load sign-in configuration.');
+          // e.g. 503 when the Core Platform cannot be reached: the server says so in plain language
+          const problem = await response.json().catch(() => null);
+          throw new ApiError(response.status, problem?.detail || 'Could not load sign-in configuration.');
         }
         return response.json();
       })
@@ -174,7 +171,7 @@ export async function startOidcSignIn(config) {
   sessionStorage.setItem(OIDC_VERIFIER_KEY, verifier);
 
   const challenge = await s256(verifier);
-  const url = new URL(`${issuerFor(config)}/oauth2/authorize`);
+  const url = new URL(config.authorizationEndpoint);
   url.searchParams.set('client_id', config.clientId);
   url.searchParams.set('redirect_uri', redirectUri());
   url.searchParams.set('response_type', 'code');
@@ -219,7 +216,7 @@ export async function completeOidcSignIn() {
     client_id: config.clientId,
     code_verifier: verifier,
   });
-  const response = await send(`${issuerFor(config)}/oauth2/token`, {
+  const response = await send(config.tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),

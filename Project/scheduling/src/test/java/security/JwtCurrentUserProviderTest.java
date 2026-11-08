@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -49,6 +50,28 @@ class JwtCurrentUserProviderTest {
 		assertThat(user).isEqualTo(new CurrentUser("U01", "Maya Brooks", Role.SCHEDULER, Set.of("CS", "MATH")));
 		assertThat(user.canManage("CS")).isTrue();
 		assertThat(user.canManage("ENG")).isFalse();
+	}
+
+	@Test
+	@DisplayName("TC-TR3.4: a departments claim in the token wins over the database, so the Core Platform decides them")
+	void departmentsFromToken() {
+		Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").subject("U01").claim("name", "Maya Brooks")
+				.claim("role", "SCHEDULER").claim("departments", List.of("CS", "PHYS")).build();
+		SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+
+		assertThat(provider.get().departments()).containsExactlyInAnyOrder("CS", "PHYS");
+		verifyNoInteractions(users);
+	}
+
+	@Test
+	@DisplayName("An empty departments claim means no departments, not a fall back to the database")
+	void emptyDepartmentsClaim() {
+		Jwt jwt = Jwt.withTokenValue("token").header("alg", "RS256").subject("U01").claim("role", "SCHEDULER")
+				.claim("departments", List.of()).build();
+		SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+
+		assertThat(provider.get().canManage("CS")).isFalse();
+		verifyNoInteractions(users);
 	}
 
 	@Test

@@ -1,12 +1,6 @@
 spring:
   application:
     name: scheduling
-  autoconfigure:
-    # The built-in sign-in (profile "local") configures Spring Authorization Server itself. Left on, Boot's
-    # auto-configuration would add a second token decoder in every profile, including a real deployment.
-    exclude:
-      - org.springframework.boot.security.oauth2.server.authorization.autoconfigure.servlet.OAuth2AuthorizationServerAutoConfiguration
-      - org.springframework.boot.security.oauth2.server.authorization.autoconfigure.servlet.OAuth2AuthorizationServerJwtAutoConfiguration
   mvc:
     problemdetails:
       enabled: true
@@ -31,8 +25,7 @@ scheduling:
   auth:
     mode: oidc          # dev and test override to "dev"; any non-dev profile requires a Core Platform issuer
     issuer-uri: ${spring.security.oauth2.resourceserver.jwt.issuer-uri:}
-    # How the Core Platform registered this UI. The browser gets both from /auth/config, and the local sign-in
-    # registers the UI with the same values.
+    # How the Core Platform registered this UI. The browser gets both from /auth/config.
     client-id: scheduling-web
     scope: openid profile email
 
