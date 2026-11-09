@@ -21,7 +21,7 @@ import service.NotFoundException;
  * account, because no endpoint ever accepts a role from the request (NFR1.4).
  */
 @RestController
-@Profile({ "local", "dev", "test" })
+@Profile({ "local", "dev", "test", "shared" })
 public class DevTokenController {
 
 	private static final Duration LIFETIME = Duration.ofHours(8);

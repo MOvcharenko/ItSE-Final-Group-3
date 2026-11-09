@@ -31,7 +31,7 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
  * and test profiles: any other profile needs a real issuer ({@link IssuerRequiredConfig}).
  */
 @Configuration
-@Profile({ "local", "dev", "test" })
+@Profile({ "local", "dev", "test", "shared" })
 public class DevAuthConfig {
 
 	static final String ISSUER = "https://core-platform.dev.local";

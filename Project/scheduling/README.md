@@ -514,3 +514,50 @@ TD-2 is in `src/test/resources/td2/`: the four filled templates, `schedule-lab-b
 - The SIS is a stub, and its student-group counts are keyed by course code and TD-1 section ids, so a student-group clash is not found between sections created through the API. (Instructor availability, timetable overlay lens, and optimization insights are fully implemented and wired).
 
 Spring needs to find the entities and repositories in `persistence`. `SchedulingApplication` lives in `app`, so it must contain `@EntityScan(basePackages = "persistence")` and `@EnableJpaRepositories(basePackages = "persistence")`. Check the `@EntityScan` import with your IDE, because Spring Boot 4 moved it.
+
+## Shared database (cross-device and team testing)
+
+By default the app runs with the `local` profile, which keeps data in `./data`
+on the machine you start it from. That is fine for one developer, but the data
+does not follow you to another device, and two developers cannot see each
+other's changes. To make that work, use the **`shared`** profile: same
+application, same UI, but pointed at a hosted Supabase Postgres project that
+every device and every developer reaches by URL.
+
+### What to put in `.env` (the only shared secret)
+
+Create `.env` in `Project/scheduling/` from the committed `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+
+```sh
+cp .env.example .env
+
+Fill in exactly two values:
+
+SUPABASE_DB_URL=jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?user=postgres.<project-ref>&sslmode=require
+SUPABASE_DB_PASSWORD=<the password>
+
+Run it
+
+```powershell
+.\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=shared'
+
+```sh
+./mvnw spring-boot:run -Dspring-boot.run.profiles=shared
+
+### What this is not
+shared is a development profile. It is not a production configuration:
+
+It uses the dev token picker (POST /dev/token), which mints tokens for
+fixed user ids without validating credentials.
+
+It has no audience check on the JWT (that will come with the real issuer).
+
+It has no login throttling, no MFA, and no password handling — the picker
+just issues a signed token for the id you choose.
+
+It is not exported to production builds: DevAuthConfig is
+@Profile({"local", "dev", "test", "shared"}), so production profiles
+never load it.

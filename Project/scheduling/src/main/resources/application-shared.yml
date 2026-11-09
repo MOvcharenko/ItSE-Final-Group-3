@@ -1,0 +1,30 @@
+# Shared development database on hosted Supabase.
+#   cp .env.example .env && edit .env
+#   ./mvnw spring-boot:run -Dspring-boot.run.profiles=shared
+# Data is shared by the whole team and every device that can reach the internet.
+# Flyway applies V*.sql on first start; DevSeed creates the three test accounts once.
+# Do NOT use this profile against production.
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${SUPABASE_DB_URL}
+    password: ${SUPABASE_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5          # conservative against Supavisor's session limit
+      minimum-idle: 1
+      idle-timeout: 180000
+      max-lifetime: 600000
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      ddl-auto: validate           # Flyway owns the schema
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+scheduling:
+  auth:
+    mode: dev            # same test-account picker; the shared DB makes it cross-device

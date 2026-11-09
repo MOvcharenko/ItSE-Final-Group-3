@@ -34,3 +34,4 @@ build/
 
 # Local database and private signing key of the built-in sign-in (profile "local")
 data/
+.env

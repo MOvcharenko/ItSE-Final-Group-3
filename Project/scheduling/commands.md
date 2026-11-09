@@ -236,3 +236,13 @@ Conflicts: two classes in the same room at the same time are both saved, because
 Check it's running: open http://localhost:8081/actuator/health in your browser. It should show "status":"UP".
 
 See it in the browser: open http://localhost:8081/ and pick an account. Everything you built above appears there, and the Scheduler can also add to it. For this data, choose Fall 2030 if it isn't already selected. The database viewer is at http://localhost:8081/h2-console.
+
+### Option: shared database (cross-device testing)
+
+Point at the team's hosted Supabase dev project so multiple devices and developers see the same data.
+
+
+
+```sh
+cp .env.example .env           # one time; fill in the password in .env from outsides
+./mvnw spring-boot:run -Dspring-boot.run.profiles=shared

@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Profile;
  * Platform whose tokens carry no audience can turn the check off explicitly.
  */
 @Configuration
-@Profile("!dev & !test & !local")
+@Profile("!dev & !test & !local & !shared")
 public class IssuerRequiredConfig {
 
 	public IssuerRequiredConfig(@Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer,

@@ -1,5 +1,6 @@
 package security;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -14,8 +15,9 @@ import persistence.AppUserRepository;
 /**
  * Keeps a staff member's scheduling profile (app_user) in step with their token, so an instructor can be assigned and
  * matched by schedule import once they have signed in, whoever runs the Core Platform. Accounts live there, not here:
- * this only copies the name, email and home department the token carries. A claim the token leaves out keeps the
- * stored value, so a token with just a name (the dev picker's) never blanks an email. Students are not stored (TR1.3).
+ * this only copies the name, email, home department and scheduler departments the token carries. A claim the token
+ * leaves out keeps the stored value, so a token with just a name (the dev picker's) never blanks an email.
+ * Students are not stored (TR1.3).
  */
 @Component
 public class ProfileSync {
@@ -48,13 +50,34 @@ public class ProfileSync {
 				: stored.map(AppUserEntity::getDepartment).orElse(null);
 
 		if (stored.isEmpty()) {
-			users.save(new AppUserEntity(id, displayName, email, department));
+			AppUserEntity profile = new AppUserEntity(id, displayName, email, department);
+			applyDepartments(profile, jwt);
+			users.save(profile);
 			return;
 		}
 		AppUserEntity profile = stored.get();
 		if (!displayName.equals(profile.getDisplayName()) || !Objects.equals(email, profile.getEmail())
 				|| !Objects.equals(department, profile.getDepartment())) {
 			profile.updateProfile(displayName, email, department);
+		}
+		applyDepartments(profile, jwt);
+	}
+
+	/**
+	 * Adds the scheduler departments the token lists. Idempotent: {@code authorizeDepartment} is a Set add, so
+	 * applying the same claim again on every request changes nothing. Never removes a department: this matches
+	 * the "a claim the token leaves out keeps the stored value" rule for the other fields (and lets {@link
+	 * config.DevSeed} seed departments a dev token does not carry).
+	 */
+	private static void applyDepartments(AppUserEntity profile, Jwt jwt) {
+		Object raw = jwt.getClaim(SecurityConfig.DEPARTMENTS_CLAIM);
+		if (!(raw instanceof List<?> departments)) {
+			return;
+		}
+		for (Object value : departments) {
+			if (value instanceof String dept && !dept.isBlank()) {
+				profile.authorizeDepartment(dept.trim());
+			}
 		}
 	}
 
