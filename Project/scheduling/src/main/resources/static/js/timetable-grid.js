@@ -1,19 +1,19 @@
-// The Timetable Builder's week grid: one block per weekly meeting, dragged to a new day or time. Dragging is for a
-// mouse or touch; a click or Enter on a block opens the section's form, where the same change can be typed.
-import { layoutOverlaps } from './calendar.js';
+// The Timetable Builder's week grid: one block per weekly meeting, dragged to a new day or time, and beside it a list
+// of courses and sections that can be dragged onto the grid. Dragging is for a mouse or touch; a click or Enter on a
+// block or list item opens the matching form, where the same change can be typed.
 import { hourLabel, minutes, timeRange } from './dates.js';
 import { el } from './dom.js';
+import { DAYS, plural, shortDay } from './labels.js';
+import { layoutOverlaps } from './layout.js';
 
-const DAYS = [['MONDAY', 'Mon'], ['TUESDAY', 'Tue'], ['WEDNESDAY', 'Wed'], ['THURSDAY', 'Thu'], ['FRIDAY', 'Fri'],
-  ['SATURDAY', 'Sat'], ['SUNDAY', 'Sun']];
 const FIRST_HOUR = 8;
 const LAST_HOUR = 18;
 const HOUR_PX = 72; // keep in step with --hour in app.css
 const SNAP_MINUTES = 5;
 const DRAG_THRESHOLD_PX = 5;
+const LIST_GRAB_PX = 10; // a list item is held near the top of its ghost block
 
 const hhmm = (total) => `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-const dayName = (day) => DAYS.find(([value]) => value === day)[1];
 const overlaps = (a, b) => a.start < b.end && b.start < a.end;
 
 /** Every weekly meeting as a grid item; one-time meetings and exams have a date, so they are not on a week grid. */
@@ -41,8 +41,10 @@ function busyFor(section, items) {
  * sections: the term's sections. conflictCounts: open conflicts per section id. busyInstructor: an instructor id whose
  * teaching is shaded, or ''. availabilityBlocks: declared availability blocks for busyInstructor.
  * onOpen(section) opens the form; onMove(section, index, {day, start, end}) saves a drag.
+ * palette: groups shown beside the grid, [{ heading, items: [{ label, detail, duration, section?, onClick, onDrop }] }].
+ * An item dropped on the grid calls onDrop({day, start, end}); one with a section shades that section's busy times.
  */
-export function weekGrid({ sections, published, conflictCounts, busyInstructor, availabilityBlocks = [], onOpen, onMove }) {
+export function weekGrid({ sections, published, conflictCounts, busyInstructor, availabilityBlocks = [], onOpen, onMove, palette = [] }) {
   const items = weeklyItems(sections);
   const days = DAYS.filter(([value], index) => index < 5 || items.some((item) => item.day === value)).map(([value]) => value);
   const firstHour = Math.min(FIRST_HOUR, ...items.map((item) => Math.floor(item.start / 60)));
@@ -92,14 +94,25 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
       class: classes.filter(Boolean).join(' '),
       type: 'button',
       style: `top:${toPx(item.start)}px;height:${Math.max(toPx(item.end) - toPx(item.start), 24)}px;left:calc(${column * width}% + 2px);width:calc(${width}% - 4px)`,
-      'aria-label': `${section.courseCode} section ${section.sectionNumber}, ${dayName(item.day)} ${when}, ${section.roomName ?? 'no room'}`
-        + `${conflicts ? `, ${conflicts === 1 ? '1 open conflict' : `${conflicts} open conflicts`}` : ''}. Edit section`,
-      title: `${section.courseCode} · ${section.sectionNumber}, ${dayName(item.day)} ${when}. Drag to move, or click to edit.`,
+      'aria-label': `${section.courseCode} section ${section.sectionNumber}, ${shortDay(item.day)} ${when}, ${section.roomName ?? 'no room'}`
+        + `${conflicts ? `, ${plural(conflicts, 'open conflict')}` : ''}. Edit section`,
+      title: `${section.courseCode} · ${section.sectionNumber}, ${shortDay(item.day)} ${when}. Drag to move, or click to edit.`,
       onclick: () => {
         if (suppressClick) { suppressClick = false; return; }
         onOpen(section);
       },
-      onpointerdown: (event) => startDrag(event, item, node),
+      onpointerdown: (down) => startDrag(down, {
+        node,
+        label: `${section.courseCode} · ${section.sectionNumber}`,
+        duration: item.end - item.start,
+        grabOffset: down.clientY - node.getBoundingClientRect().top,
+        busy: busyFor(section, items),
+        onDrop: (spot) => {
+          if (spot.day !== item.day || spot.start !== item.start) {
+            onMove(section, item.index, { day: spot.day, start: hhmm(spot.start), end: hhmm(spot.end) });
+          }
+        },
+      }),
     },
       el('span', { class: 'course' }, conflicts > 0 && el('span', { class: 'flag', 'aria-hidden': 'true' }, '!'),
         `${section.courseCode} · ${section.sectionNumber}`),
@@ -108,29 +121,66 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
     return node;
   }
 
-  function startDrag(down, item, node) {
+  /** A course or section in the list beside the grid: drag it onto a day and time, or click it to open its form. */
+  function paletteItem(entry) {
+    const node = el('button', {
+      class: 'palette-item',
+      type: 'button',
+      title: `Drag onto the grid, or click to open the form`,
+      onclick: () => {
+        if (suppressClick) { suppressClick = false; return; }
+        entry.onClick();
+      },
+      onpointerdown: (down) => startDrag(down, {
+        node,
+        label: entry.label,
+        duration: entry.duration,
+        grabOffset: LIST_GRAB_PX,
+        // Its own meetings count too: a second meeting can't sit on top of the first.
+        busy: entry.section ? [...busyFor(entry.section, items), ...ownMeetings(entry.section)] : [],
+        onGrid: true,
+        onDrop: (spot) => entry.onDrop({ day: spot.day, start: hhmm(spot.start), end: hhmm(spot.end) }),
+      }),
+    },
+      el('span', { class: 'course' }, entry.label),
+      entry.detail && el('span', { class: 'muted' }, entry.detail));
+    return el('li', { 'data-search': `${entry.label} ${entry.detail ?? ''}`.toLowerCase() }, node);
+  }
+
+  function ownMeetings(section) {
+    return items.filter((item) => item.section.id === section.id)
+      .map((item) => ({ day: item.day, start: item.start, end: item.end, label: `${section.courseCode} · ${section.sectionNumber} already meets` }));
+  }
+
+  /**
+   * Drags a ghost block over the grid. With onGrid, letting go outside the grid does nothing; otherwise the nearest
+   * day is used, so a block dragged a little too far still lands. onDrop({day, start, end}) gets minutes since midnight.
+   */
+  function startDrag(down, { node, label, duration, grabOffset, busy, onGrid = false, onDrop }) {
     if (down.button !== 0 || !down.isPrimary) return;
-    const duration = item.end - item.start;
-    const grabOffset = down.clientY - node.getBoundingClientRect().top;
-    const busy = busyFor(item.section, items);
     let ghost = null;
     let target = null;
 
     const where = (event) => {
       const rects = days.map((day) => [day, columns.get(day).getBoundingClientRect()]);
-      const [day, rect] = rects.find(([, r]) => event.clientX >= r.left && event.clientX < r.right)
-        ?? (event.clientX < rects[0][1].left ? rects[0] : rects.at(-1));
+      const inside = rects.find(([, r]) => event.clientX >= r.left && event.clientX < r.right);
+      if (onGrid && (!inside || event.clientY < inside[1].top || event.clientY > inside[1].bottom)) return null;
+      const [day, rect] = inside ?? (event.clientX < rects[0][1].left ? rects[0] : rects.at(-1));
       const raw = firstHour * 60 + (event.clientY - grabOffset - rect.top) * 60 / HOUR_PX;
       const start = Math.min(Math.max(Math.round(raw / SNAP_MINUTES) * SNAP_MINUTES, 0), 24 * 60 - duration);
       return { day, start, end: start + duration };
     };
 
     const show = (spot) => {
+      if (!spot) {
+        ghost.remove();
+        return;
+      }
       const clash = busy.find((entry) => entry.day === spot.day && overlaps(entry, spot));
       ghost.className = `block ghost${clash ? ' clash' : ''}`;
       ghost.style.cssText = `top:${toPx(spot.start)}px;height:${toPx(spot.end) - toPx(spot.start)}px;left:2px;right:2px`;
-      ghost.replaceChildren(el('span', { class: 'course' }, `${dayName(spot.day)} ${timeRange(hhmm(spot.start), hhmm(spot.end))}`),
-        el('span', {}, clash ? clash.label : `${item.section.courseCode} · ${item.section.sectionNumber}`));
+      ghost.replaceChildren(el('span', { class: 'course' }, `${shortDay(spot.day)} ${timeRange(hhmm(spot.start), hhmm(spot.end))}`),
+        el('span', {}, clash ? clash.label : label));
       columns.get(spot.day).append(ghost);
     };
 
@@ -145,9 +195,7 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
       node.classList.remove('lifted');
       grid.querySelectorAll('.busy.drag').forEach((shade) => shade.remove());
       suppressClick = true; // the click that follows a drag is not a request to open the form
-      if (save && target && (target.day !== item.day || target.start !== item.start)) {
-        onMove(item.section, item.index, { day: target.day, start: hhmm(target.start), end: hhmm(target.end) });
-      }
+      if (save && target) onDrop(target);
     };
     const onPointerMove = (event) => {
       if (!ghost) {
@@ -178,11 +226,39 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
   const grid = el('div', { class: 'grid builder' },
     el('div', { class: 'grid-head' },
       el('div', { class: 'grid-corner' }),
-      days.map((day) => el('div', { class: 'grid-day' }, dayName(day)))),
+      days.map((day) => el('div', { class: 'grid-day' }, shortDay(day)))),
     el('div', { class: 'grid-body' },
       el('div', { class: 'grid-times', style: `height:${height}px` }, hourLabels),
       days.map((day) => columns.get(day))));
-  return el('div', { class: 'scroll-x' }, grid);
+  const gridBox = el('div', { class: 'scroll-x' }, grid);
+  if (!palette.some((group) => group.items.length)) return gridBox;
+
+  const groups = palette.filter((group) => group.items.length).map((group) => el('div', { class: 'palette-group' },
+    el('h3', {}, group.heading),
+    el('ul', {}, group.items.map(paletteItem))));
+  const none = el('p', { class: 'hint', hidden: true }, 'Nothing matches.');
+  const find = el('input', {
+    type: 'search',
+    placeholder: 'Find a course or section',
+    'aria-label': 'Find a course or section',
+    oninput: () => {
+      const text = find.value.trim().toLowerCase();
+      let shown = 0;
+      groups.forEach((group) => {
+        let inGroup = 0;
+        group.querySelectorAll('li').forEach((li) => {
+          li.hidden = Boolean(text) && !li.dataset.search.includes(text);
+          if (!li.hidden) inGroup++;
+        });
+        group.hidden = inGroup === 0;
+        shown += inGroup;
+      });
+      none.hidden = shown > 0;
+    },
+  });
+  return el('div', { class: 'builder-layout' },
+    el('aside', { class: 'palette', 'aria-label': 'Courses and sections to place' }, find, groups, none),
+    gridBox);
 }
 
 /** The meetings a week grid can't show: one-time meetings and exams, by date. */

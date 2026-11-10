@@ -1,20 +1,19 @@
-import {
-  currentUser, getAuthConfig, getJson, setSessionEndedHandler, signIn, signOutOfCorePlatform, startOidcSignIn,
-} from './api.js';
+import { getAuthConfig, signIn, signOutOfCorePlatform, startOidcSignIn } from './auth.js';
 import { bookingsScreen } from './bookings.js';
 import { calendarScreen } from './calendar.js';
 import { catalogScreen } from './catalog.js';
 import { conflictsScreen } from './conflicts.js';
 import { banner, el, initials } from './dom.js';
+import { latestOnly, setSessionEndedHandler, Superseded } from './http.js';
 import { insightsScreen } from './insights.js';
 import { NOTICES_CHANGED, UNREAD_COUNTED } from './notices.js';
+import { api } from './scheduling-api.js';
+import { currentUser } from './session.js';
+import { appShell, landing, roleLabel } from './shell.js';
 import { teachingScreen } from './teaching.js';
 import { timetableScreen } from './timetable.js';
 
 const UNREAD_REFRESH_MS = 60000;
-
-/** "SCHEDULER" → "Scheduler". The role comes from the token or /auth/config, never from a list here. */
-const roleLabel = (role) => role.charAt(0) + role.slice(1).toLowerCase();
 
 // What each role can do, for the dev-account picker. The accounts themselves come from /auth/config.
 const ROLE_BLURBS = {
@@ -45,7 +44,7 @@ const root = document.getElementById('app');
 // Notices are read on the calendar, so its sidebar link carries the unread count on every screen.
 let unreadBadge = null;
 let unreadCount = 0;
-let unreadRequest = 0;
+const fetchNotices = latestOnly(() => api.notices());
 
 function showUnread(count) {
   unreadCount = count;
@@ -58,16 +57,15 @@ function showUnread(count) {
 /** A failed check keeps the last count, because the screen in use reports any real problem itself. */
 async function refreshUnread() {
   if (!unreadBadge || !currentUser()) return;
-  const thisRequest = ++unreadRequest;
   try {
-    const notices = await getJson('/api/notices');
-    if (thisRequest !== unreadRequest) return; // the panel has reported something newer
+    const notices = await fetchNotices();
     const count = notices.filter((notice) => !notice.read).length;
     const changed = count !== unreadCount;
     showUnread(count);
     if (changed) document.dispatchEvent(new Event(NOTICES_CHANGED));
-  } catch {
-    // keep the last count
+  } catch (error) {
+    if (error instanceof Superseded) return; // the panel has reported something newer
+    // otherwise keep the last count
   }
 }
 
@@ -78,7 +76,7 @@ async function refreshUnread() {
 async function showSignIn(message, { switchAccount = false } = {}) {
   unreadBadge = null;
   unreadCount = 0;
-  unreadRequest++;
+  fetchNotices.drop();
   const messages = el('div', {}, message && banner(message));
 
   let config;
@@ -86,10 +84,7 @@ async function showSignIn(message, { switchAccount = false } = {}) {
     config = await getAuthConfig();
   } catch (error) {
     document.title = 'Sign in · Academic Scheduling';
-    root.replaceChildren(el('main', { class: 'landing' },
-      el('div', { class: 'brand' },
-        el('h1', {}, 'Academic Scheduling'),
-        el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
+    root.replaceChildren(landing(null,
       banner(error.message || 'Could not load sign-in configuration.', 'Try again', () => showSignIn(message, { switchAccount }))));
     return;
   }
@@ -97,10 +92,7 @@ async function showSignIn(message, { switchAccount = false } = {}) {
   // Nothing to choose here, so go straight to the sign-in form. With a message to read, wait for a click instead.
   if (config.mode === 'oidc' && !message) {
     document.title = 'Signing in · Academic Scheduling';
-    root.replaceChildren(el('main', { class: 'landing' },
-      el('div', { class: 'brand' },
-        el('h1', {}, 'Academic Scheduling'),
-        el('p', {}, 'Opening sign-in…'))));
+    root.replaceChildren(landing('Opening sign-in…'));
     try {
       await startOidcSignIn(config);
       return;
@@ -117,13 +109,7 @@ async function showSignIn(message, { switchAccount = false } = {}) {
     : 'Your role comes from your account.';
 
   document.title = 'Sign in · Academic Scheduling';
-  root.replaceChildren(el('main', { class: 'landing' },
-    el('div', { class: 'brand' },
-      el('h1', {}, 'Academic Scheduling'),
-      el('p', {}, 'Timetables · Rooms · Equipment · Faculty')),
-    messages,
-    body,
-    el('p', { class: 'landing-note' }, note)));
+  root.replaceChildren(landing(null, messages, body, el('p', { class: 'landing-note' }, note)));
 }
 
 function devAccountPicker(messages, accounts) {
@@ -188,57 +174,30 @@ async function showApp() {
     // only the Account link depends on it
   }
 
-  const title = screen.title(user.role);
-  const crumbExtras = el('div', { class: 'crumb' });
-  const actions = el('div', { class: 'crumb' });
-  const setTopbar = (extras, buttons) => {
-    crumbExtras.replaceChildren(...extras);
-    actions.replaceChildren(...buttons);
-  };
-
   unreadBadge = el('span', { class: 'nav-badge', hidden: true });
   showUnread(unreadCount);
 
-  document.title = `${title} · Academic Scheduling`;
-  root.replaceChildren(el('div', { class: 'shell' },
-    el('aside', { class: 'sidebar' },
-      el('div', { class: 'wordmark' },
-        el('span', { class: 'name' }, 'Academic Scheduling'),
-        el('span', { class: 'sub' }, 'Timetables · Rooms · Equipment · Faculty')),
-      el('nav', { class: 'nav', 'aria-label': 'Main' },
-        screens.map((item) => el('a', {
-          class: 'nav-item',
-          href: `#${item.key}`,
-          'aria-current': item === screen ? 'page' : null,
-        }, el('span', { class: 'dot' }), item.title(user.role), item.key === 'calendar' && unreadBadge))),
-      el('div', { class: 'sidebar-foot' },
-        el('div', { class: 'who' },
-          el('div', { class: 'avatar' }, initials(user.name)),
-          el('div', { class: 'text' },
-            el('span', { class: 'name' }, user.name),
-            el('span', { class: 'role' }, roleLabel(user.role)))),
-        // Change password, and manage accounts for administrators (when the sign-in has those pages).
-        config?.accountUri && el('a', { class: 'btn quiet small wide', href: config.accountUri }, 'Account'),
-        el('button', {
-          class: 'btn quiet small wide',
-          type: 'button',
-          onclick: () => {
-            // With a message, the sign-in page waits for a click instead of signing straight back in.
-            if (!signOutOfCorePlatform(config)) showSignIn('You have signed out. Sign in to choose an account.');
-          },
-        }, 'Switch account'))),
-    el('div', { class: 'main' },
-      el('header', { class: 'topbar' },
-        el('div', { class: 'crumb' }, el('h1', {}, title), crumbExtras),
-        actions),
-      el('main', {}, screen.render(user, setTopbar)))));
+  const shell = appShell({
+    user,
+    screens,
+    current: screen,
+    badges: { calendar: unreadBadge },
+    accountUri: config?.accountUri,
+    // With a message, the sign-in page waits for a click instead of signing straight back in.
+    onSwitchAccount: () => {
+      if (!signOutOfCorePlatform(config)) showSignIn('You have signed out. Sign in to choose an account.');
+    },
+  });
+  document.title = `${screen.title(user.role)} · Academic Scheduling`;
+  root.replaceChildren(shell.element);
+  shell.content.append(screen.render(user, shell.setTopbar));
   refreshUnread();
 }
 
 setSessionEndedHandler(() => showSignIn('Your session has ended. Please sign in again.'));
 window.addEventListener('hashchange', showApp);
 document.addEventListener(UNREAD_COUNTED, (event) => {
-  unreadRequest++;
+  fetchNotices.drop();
   showUnread(event.detail);
 });
 // Not while a form is open: an expired session would return to sign-in and lose what was typed.

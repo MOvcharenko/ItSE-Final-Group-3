@@ -1,8 +1,10 @@
-import { getJson, post } from './api.js';
 import { whenLabel } from './dates.js';
-import { banner, el } from './dom.js';
+import { banner, dataTable, el } from './dom.js';
 import { field, input, openForm, select } from './forms.js';
-import { availabilityPanel } from './search.js';
+import { latestOnly, Superseded } from './http.js';
+import { labelOf, plural } from './labels.js';
+import { api } from './scheduling-api.js';
+import { availabilitySearchPanel } from './search.js';
 
 const RESOURCE_TYPES = [['ROOM', 'Room'], ['EQUIPMENT', 'Equipment']];
 const STATUS_TAGS = {
@@ -21,26 +23,23 @@ export function bookingsScreen(user, setTopbar) {
 
   const requestButton = el('button', { class: 'btn primary', type: 'button', disabled: true, onclick: () => requestForm() }, 'Request booking');
   setTopbar([], [requestButton]);
-  const search = availabilityPanel((type, resource, { start, end }) => requestForm({ type, resourceId: resource.id, start, end }));
+  const search = availabilitySearchPanel((type, resource, { start, end }) => requestForm({ type, resourceId: resource.id, start, end }));
   const statusFilter = select('status',
     [['', 'All statuses'], ...Object.entries(STATUS_TAGS).map(([value, [, label]]) => [value, label])], '',
     { 'aria-label': 'Filter by status', onchange: load });
-  let requestNumber = 0;
+  // A newer filter choice takes over from a list still on its way.
+  const fetchAll = latestOnly((status) => Promise.all([api.bookings(status), api.rooms(), api.equipment()]));
 
   async function load() {
-    const thisRequest = ++requestNumber;
-    const status = statusFilter.value;
-    const bookingsPath = status ? `/api/bookings?status=${status}` : '/api/bookings';
     try {
-      const [bookings, rooms, equipment] = await Promise.all([bookingsPath, '/api/rooms', '/api/equipment'].map(getJson));
-      if (thisRequest !== requestNumber) return; // a newer filter choice has taken over
+      const [bookings, rooms, equipment] = await fetchAll(statusFilter.value);
       Object.assign(state, { bookings, rooms, equipment });
       search.setCatalog(rooms, equipment);
       messages.replaceChildren();
       requestButton.disabled = false;
       render();
     } catch (error) {
-      if (thisRequest !== requestNumber) return;
+      if (error instanceof Superseded) return;
       list.replaceChildren();
       meta.textContent = '';
       messages.replaceChildren(banner(error.message, 'Try again', load));
@@ -49,7 +48,7 @@ export function bookingsScreen(user, setTopbar) {
 
   function render() {
     const { bookings } = state;
-    meta.textContent = bookings.length === 1 ? '1 request' : `${bookings.length} requests`;
+    meta.textContent = plural(bookings.length, 'request');
     if (!bookings.length && statusFilter.value) {
       list.replaceChildren(el('div', { class: 'empty' },
         el('strong', {}, `No ${statusFilter.selectedOptions[0].textContent.toLowerCase()} requests`),
@@ -66,22 +65,18 @@ export function bookingsScreen(user, setTopbar) {
         'Request a room or equipment for a review session, makeup exam or event.'));
       return;
     }
-    const columns = [scheduler && 'Requested by', 'Purpose', 'Type', 'Room or equipment', 'When', 'Status', scheduler && ''].filter((name) => name !== false);
-    list.replaceChildren(el('table', { class: 'cards' },
-      el('thead', {}, el('tr', {}, columns.map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, bookings.map(bookingRow))));
-  }
-
-  function bookingRow(booking) {
-    const [tagClass, statusLabel] = STATUS_TAGS[booking.status];
-    return el('tr', {},
-      scheduler && el('td', { 'data-label': 'Requested by' }, booking.requesterName),
-      el('td', { 'data-label': 'Purpose' }, booking.purpose),
-      el('td', { 'data-label': 'Type' }, RESOURCE_TYPES.find(([value]) => value === booking.resourceType)[1]),
-      el('td', { 'data-label': 'Room or equipment' }, booking.resourceName),
-      el('td', { class: 'nowrap', 'data-label': 'When' }, whenLabel(booking)),
-      el('td', { 'data-label': 'Status' }, el('span', { class: tagClass }, statusLabel)),
-      scheduler && el('td', { class: 'row-actions' }, decisionButtons(booking)));
+    list.replaceChildren(dataTable([
+      scheduler && { label: 'Requested by', cell: (booking) => booking.requesterName },
+      { label: 'Purpose', cell: (booking) => booking.purpose },
+      { label: 'Type', cell: (booking) => labelOf(RESOURCE_TYPES, booking.resourceType) },
+      { label: 'Room or equipment', cell: (booking) => booking.resourceName },
+      { label: 'When', class: 'nowrap', cell: whenLabel },
+      { label: 'Status', cell: (booking) => {
+        const [tagClass, statusLabel] = STATUS_TAGS[booking.status];
+        return el('span', { class: tagClass }, statusLabel);
+      } },
+      scheduler && { label: '', class: 'row-actions', cell: decisionButtons },
+    ], bookings, { cards: true }));
   }
 
   /** Pending can be approved or declined, Approved can only be cancelled, and Cancelled is final. */
@@ -112,7 +107,7 @@ export function bookingsScreen(user, setTopbar) {
   async function approve(booking, button) {
     button.disabled = true;
     try {
-      await post(`/api/bookings/${encodeURIComponent(booking.id)}/approve`);
+      await api.approveBooking(booking.id);
       await load();
       search.refresh();
     } catch (error) {
@@ -133,7 +128,7 @@ export function bookingsScreen(user, setTopbar) {
       closeLabel: 'Go back',
       body: [field('Note to the requester (optional)', el('textarea', { name: 'note', rows: 3, maxlength: 500 }))],
       onSubmit: async (form) => {
-        await post(`/api/bookings/${encodeURIComponent(booking.id)}/cancel`, { note: form.get('note') || null });
+        await api.cancelBooking(booking.id, form.get('note') || null);
         await load();
         search.refresh();
       },
@@ -170,7 +165,7 @@ export function bookingsScreen(user, setTopbar) {
         field('Purpose', input('purpose', { required: true, maxlength: 500, placeholder: 'Exam review session' })),
       ],
       onSubmit: async (form) => {
-        await post('/api/bookings', {
+        await api.requestBooking({
           resourceType: form.get('resourceType'),
           resourceId: form.get('resourceId'),
           start: form.get('start'),

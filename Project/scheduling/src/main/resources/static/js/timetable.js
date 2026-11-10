@@ -1,23 +1,26 @@
-import { chosenTermId, del, getJson, patch, post, put, rememberTerm, takeSectionToOpen } from './api.js';
-import { dateRange, shortDate, timeRange } from './dates.js';
-import { banner, el } from './dom.js';
+import { dateRange } from './dates.js';
+import { banner, dataTable, el } from './dom.js';
 import { field, input, openForm, select } from './forms.js';
+import { latestOnly, Superseded } from './http.js';
+import { DAYS, meetingLabel, plural } from './labels.js';
+import { api } from './scheduling-api.js';
+import { rememberTerm, takeSectionToOpen } from './session.js';
+import { initialTerm, sortNewestFirst, termPicker } from './terms.js';
 import { datedMeetings, weekGrid } from './timetable-grid.js';
 
-const DAYS = [['MONDAY', 'Monday'], ['TUESDAY', 'Tuesday'], ['WEDNESDAY', 'Wednesday'], ['THURSDAY', 'Thursday'],
-  ['FRIDAY', 'Friday'], ['SATURDAY', 'Saturday'], ['SUNDAY', 'Sunday']];
 const PATTERNS = [['WEEKLY', 'Weekly'], ['ONE_TIME', 'One time'], ['EXAM', 'Exam']];
+const DEFAULT_MINUTES = 50; // a course dragged from the list starts as one 50-minute class
 
 const hhmm = (time) => time.slice(0, 5);
-const termLabel = (term) => (term.status === 'DRAFT' ? `${term.name} (Draft)` : term.name);
-const countLabel = (sections) => (sections === 1 ? '1 section' : `${sections} sections`);
+const sectionName = (section) => `${section.courseCode} · ${section.sectionNumber}`;
+const toMinutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+const asSent = (meeting) => ({ ...meeting, start: hhmm(meeting.start), end: hhmm(meeting.end) });
 
-export function meetingLabel(meeting) {
-  const when = timeRange(meeting.start, meeting.end);
-  if (meeting.pattern === 'WEEKLY') {
-    return `${DAYS.find(([value]) => value === meeting.day)[1].slice(0, 3)} ${when}`;
-  }
-  return `${meeting.pattern === 'EXAM' ? 'Exam, ' : ''}${shortDate(meeting.date)}, ${when}`;
+/** The next free section number for a subject in this term: "01", then "02", and so on. */
+function nextSectionNumber(sections, subjectId) {
+  const used = sections.filter((section) => section.subjectId === subjectId)
+    .map((section) => Number.parseInt(section.sectionNumber, 10)).filter(Number.isFinite);
+  return String(used.length ? Math.max(...used) + 1 : 1).padStart(2, '0');
 }
 
 /** One editable row of a section's meetings. read() gives the API's meeting object. */
@@ -65,20 +68,24 @@ export function timetableScreen(user, setTopbar) {
   const messages = el('div', { class: 'messages' });
   const status = el('p', { class: 'status', role: 'status' });
   const panel = el('section', { class: 'panel' }, el('div', { class: 'loading' }, 'Loading timetable…'));
+  // A term is remembered for the other screens only once its sections have loaded.
+  const picker = termPicker((term) => switchTerm(term.id), { remember: false });
   let topbar = null;
-  let requestNumber = 0;
-  let busyRequest = 0; // the "Show busy times for" lookup, so only the latest choice's answer is shown
+  const fetchTerm = latestOnly((term) => (term
+    ? Promise.all([api.sections(term.id), api.conflicts(term.id, 'OPEN')])
+    : Promise.resolve([[], []])));
+  // The "Show busy times for" lookup, so only the latest choice's answer is shown
+  const fetchAvailability = latestOnly((instructorId, termId) => api.instructorAvailability(instructorId, termId));
 
   const showError = (error, retry) => messages.replaceChildren(banner(error.message, retry && 'Try again', retry));
 
   async function start() {
     try {
       const [terms, subjects, rooms, equipment, instructors] = await Promise.all(
-        ['/api/terms', '/api/subjects', '/api/rooms', '/api/equipment', '/api/instructors'].map(getJson));
+        [api.terms(), api.subjects(), api.rooms(), api.equipment(), api.instructors()]);
       Object.assign(state, { terms, subjects, rooms, equipment, instructors });
       messages.replaceChildren();
-      const chosen = terms.find((term) => term.id === chosenTermId());
-      await selectTerm((chosen ?? terms[0])?.id, false); // opening the screen is not choosing a term
+      await selectTerm(initialTerm(terms)?.id, false); // opening the screen is not choosing a term
       // Arrived from "Open in timetable" on the Conflicts screen
       const openId = takeSectionToOpen();
       const toOpen = openId && state.sections.find((section) => section.id === openId);
@@ -94,24 +101,19 @@ export function timetableScreen(user, setTopbar) {
    * them always agree. An answer overtaken by a newer choice, whether it worked or failed, is ignored.
    */
   async function selectTerm(id, remember = true) {
-    const thisRequest = ++requestNumber;
     const term = state.terms.find((item) => item.id === id) ?? null;
     let sections;
     let conflicts;
     try {
-      const path = term && `/api/terms/${encodeURIComponent(term.id)}`;
-      [sections, conflicts] = term
-        ? await Promise.all([getJson(`${path}/sections`), getJson(`${path}/conflicts?status=OPEN`)])
-        : [[], []];
+      [sections, conflicts] = await fetchTerm(term);
     } catch (error) {
-      if (thisRequest === requestNumber) throw error;
-      return;
+      if (error instanceof Superseded) return;
+      throw error;
     }
-    if (thisRequest !== requestNumber) return;
     if (term?.id !== state.term?.id) {
       view.busyInstructor = '';
       view.availabilityBlocks = [];
-      busyRequest++; // an answer still on its way is for the term being left
+      fetchAvailability.drop(); // an answer still on its way is for the term being left
     }
     Object.assign(state, { term, sections, conflicts });
     if (remember && term) rememberTerm(term.id);
@@ -127,9 +129,9 @@ export function timetableScreen(user, setTopbar) {
       await selectTerm(id);
     } catch (error) {
       setSwitching(false);
-      topbar.picker.value = state.term.id;
+      picker.show(state.term);
       showError(error, () => {
-        topbar.picker.value = id;
+        picker.select.value = id;
         switchTerm(id);
       });
     }
@@ -159,24 +161,20 @@ export function timetableScreen(user, setTopbar) {
       return;
     }
     const draft = term.status === 'DRAFT';
-    const picker = select('term', state.terms.map((item) => [item.id, termLabel(item)]), term.id, {
-      'aria-label': 'Term',
-      onchange: () => switchTerm(picker.value),
-    });
-    const details = [el('span', { class: draft ? 'tag draft' : 'tag published' }, draft ? 'Draft' : 'Published'),
-      el('span', { class: 'muted' }, dateRange(term.startDate, term.endDate))];
+    picker.setTerms(state.terms);
+    picker.show(term);
+    const details = [picker.tag, el('span', { class: 'muted' }, dateRange(term.startDate, term.endDate))];
     const actions = [newButton,
       el('button', { class: 'btn', type: 'button', onclick: editTerm }, 'Edit term'),
       el('button', { class: 'btn', type: 'button', onclick: copyTerm }, 'Copy term'),
       draft && el('button', { class: 'btn danger-line', type: 'button', onclick: deleteTerm }, 'Delete term'),
       draft && el('button', { class: 'btn primary', type: 'button', onclick: publishTerm }, 'Publish term')].filter(Boolean);
-    topbar = { picker, details, actions };
-    setTopbar([picker, ...details], actions);
+    topbar = { details, actions };
+    setTopbar([picker.select, ...details], actions);
   }
 
   function sectionsPanel() {
     const missing = [!state.subjects.length && 'subject', !state.rooms.length && 'room'].filter(Boolean);
-    const count = countLabel(state.sections.length);
     const open = state.conflicts.length;
     const modes = [['grid', 'Week grid'], ['list', 'List']].map(([mode, text]) => el('button', {
       type: 'button',
@@ -186,9 +184,9 @@ export function timetableScreen(user, setTopbar) {
     const head = el('div', { class: 'panel-head' },
       el('h2', {}, 'Sections'),
       el('div', { class: 'crumb' },
-        state.sections.length > 0 && el('div', { class: 'segmented', role: 'group', 'aria-label': 'Show sections as' }, modes),
-        open > 0 && el('a', { class: 'tag sev-high', href: '#conflicts' }, `${open} open conflict${open === 1 ? '' : 's'}`),
-        el('span', { class: 'meta' }, count),
+        !missing.length && el('div', { class: 'segmented', role: 'group', 'aria-label': 'Show sections as' }, modes),
+        open > 0 && el('a', { class: 'tag sev-high', href: '#conflicts' }, plural(open, 'open conflict')),
+        el('span', { class: 'meta' }, plural(state.sections.length, 'section')),
         !missing.length && el('button', { class: 'btn small', type: 'button', onclick: () => sectionForm() }, 'Add section')));
     if (missing.length) {
       return [head, el('div', { class: 'empty' },
@@ -196,17 +194,35 @@ export function timetableScreen(user, setTopbar) {
         'A section needs a subject and a room from the catalog.',
         el('a', { class: 'btn primary', href: '#catalog' }, 'Go to Catalog'))];
     }
-    if (!state.sections.length) {
+    // On the grid, an empty term still shows the grid, so the first course can be dragged onto it.
+    if (!state.sections.length && view.mode !== 'grid') {
       return [head, el('div', { class: 'empty' },
         el('strong', {}, 'No sections in this term yet'),
         el('button', { class: 'btn primary', type: 'button', onclick: () => sectionForm() }, 'Add the first section'))];
     }
     const noRoom = sectionsWithoutRoom();
     return [head, status, noRoom > 0 && el('div', { class: 'panel-body' }, banner(
-      `${countLabel(noRoom)} ${noRoom === 1 ? 'has' : 'have'} no room, usually because a copied room is out of service. Use Edit to choose one.`)),
-    ...(view.mode === 'grid' ? gridView() : [el('div', { class: 'scroll-x' }, el('table', {},
-      el('thead', {}, el('tr', {}, ['Course', 'Section', 'Room', 'Instructors', 'Meets', ''].map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, state.sections.map(sectionRow))))])].filter(Boolean);
+      `${plural(noRoom, 'section')} ${noRoom === 1 ? 'has' : 'have'} no room, usually because a copied room is out of service. Use Edit to choose one.`)),
+    ...(view.mode === 'grid' ? gridView() : [sectionsTable()])].filter(Boolean);
+  }
+
+  function sectionsTable() {
+    return dataTable([
+      { label: 'Course', cell: (section) => section.courseCode },
+      { label: 'Section', cell: (section) => section.sectionNumber },
+      { label: 'Room', cell: (section) => section.roomName ?? el('span', { class: 'tag cancelled' }, 'No room') },
+      { label: 'Instructors', cell: (section) => section.instructors.map((person) => person.name).join(', ') },
+      { label: 'Meets', cell: (section) => section.meetings.map((meeting) => el('div', { class: 'nowrap' }, meetingLabel(meeting))) },
+      { label: '', class: 'row-actions', cell: sectionActions },
+    ], state.sections);
+  }
+
+  function sectionActions(section) {
+    const label = `${section.courseCode} section ${section.sectionNumber}`;
+    return [
+      el('button', { class: 'btn small', type: 'button', 'aria-label': `Edit ${label}`, onclick: () => sectionForm(section) }, 'Edit'),
+      el('button', { class: 'btn quiet small', type: 'button', 'aria-label': `Remove ${label}`, onclick: () => removeSection(section) }, 'Remove'),
+    ];
   }
 
   function gridView() {
@@ -216,32 +232,17 @@ export function timetableScreen(user, setTopbar) {
     state.sections.forEach((section) => section.instructors.forEach((person) => teaching.set(person.id, person.name)));
     const busyPick = select('busy', [['', 'Nobody'], ...[...teaching].sort((a, b) => a[1].localeCompare(b[1]))], view.busyInstructor, {
       id: 'busy-instructor',
-      onchange: async () => {
-        const thisRequest = ++busyRequest;
-        messages.replaceChildren(); // an earlier lookup's error no longer applies
-        view.busyInstructor = busyPick.value;
-        view.availabilityBlocks = [];
-        let failure = null;
-        if (view.busyInstructor && state.term) {
-          try {
-            const lens = await getJson(`/api/instructors/${encodeURIComponent(view.busyInstructor)}/availability?termId=${encodeURIComponent(state.term.id)}`);
-            if (thisRequest !== busyRequest) return; // a newer choice has taken over
-            view.availabilityBlocks = lens.blocks || [];
-          } catch (error) {
-            if (thisRequest !== busyRequest) return;
-            failure = error;
-          }
-        }
-        render();
-        // Their teaching is still shaded; only the declared availability couldn't be shown.
-        if (failure) showError(failure);
-      },
+      onchange: () => showBusyTimes(busyPick.value),
     });
     const dated = datedMeetings(state.sections);
+    const hint = state.sections.length
+      ? 'Drag a course from the list onto a day and time to add a section, or a section to give it another weekly meeting. '
+        + 'Drag a class on the grid to move it. While you drag, times when its instructors or room are already in use are shaded. Click anything to edit it.'
+      : 'Drag a course from the list onto a day and time to add the first section, or click a course to fill in the form.';
     return [
       el('div', { class: 'toolbar' },
-        field('Show busy times for', busyPick),
-        el('p', { class: 'hint' }, 'Drag a class to move it. While you drag, times when its instructors or room are already in use are shaded. Click a class to edit it.')),
+        state.sections.length > 0 && field('Show busy times for', busyPick),
+        el('p', { class: 'hint' }, hint)),
       weekGrid({
         sections: state.sections,
         published: state.term.status === 'PUBLISHED',
@@ -250,42 +251,107 @@ export function timetableScreen(user, setTopbar) {
         availabilityBlocks: view.availabilityBlocks,
         onOpen: (section) => sectionForm(section),
         onMove: moveMeeting,
+        palette: paletteGroups(),
       }),
       dated.length > 0 && el('div', { class: 'panel-body dated' },
         el('h3', {}, 'One-time meetings and exams'),
         el('ul', {}, dated.map(({ section, meeting }) => el('li', {},
-          el('button', { class: 'btn small quiet', type: 'button', onclick: () => sectionForm(section) },
-            `${section.courseCode} · ${section.sectionNumber}`),
+          el('button', { class: 'btn small quiet', type: 'button', onclick: () => sectionForm(section) }, sectionName(section)),
           ` ${meetingLabel(meeting)}`)))),
     ].filter(Boolean);
   }
 
+  /** Shades an instructor's teaching and declared availability on the grid, or nobody's. */
+  async function showBusyTimes(instructorId) {
+    messages.replaceChildren(); // an earlier lookup's error no longer applies
+    view.busyInstructor = instructorId;
+    view.availabilityBlocks = [];
+    let failure = null;
+    if (instructorId && state.term) {
+      try {
+        view.availabilityBlocks = (await fetchAvailability(instructorId, state.term.id)).blocks || [];
+      } catch (error) {
+        if (error instanceof Superseded) return; // a newer choice has taken over
+        failure = error;
+      }
+    } else {
+      fetchAvailability.drop(); // "Nobody": a lookup still on its way no longer applies
+    }
+    render();
+    // Their teaching is still shaded; only the declared availability couldn't be shown.
+    if (failure) showError(failure);
+  }
+
   /**
-   * Saves a drag on the grid: the section is put back whole with that one meeting changed, so the server checks it
-   * like any other edit and re-runs conflict detection. The answer says if the move caused a conflict.
+   * The list beside the grid. A course dropped on the grid opens the Add section form with that time filled in,
+   * since a new section still needs a room and instructors; a section dropped on it gets another weekly meeting.
    */
-  async function moveMeeting(section, index, to) {
-    const { term } = state;
+  function paletteGroups() {
+    const courses = [...state.subjects].sort((a, b) => a.courseCode.localeCompare(b.courseCode)).map((subject) => ({
+      label: subject.courseCode,
+      detail: subject.title,
+      duration: DEFAULT_MINUTES,
+      onClick: () => sectionForm(null, { subjectId: subject.id }),
+      onDrop: (spot) => sectionForm(null, { subjectId: subject.id, meeting: { pattern: 'WEEKLY', ...spot } }),
+    }));
+    const sections = [...state.sections].sort((a, b) => sectionName(a).localeCompare(sectionName(b))).map((section) => {
+      const weekly = section.meetings.find((meeting) => meeting.pattern === 'WEEKLY');
+      return {
+        label: sectionName(section),
+        detail: plural(section.meetings.length, 'meeting'),
+        duration: weekly ? toMinutes(weekly.end) - toMinutes(weekly.start) : DEFAULT_MINUTES,
+        section,
+        onClick: () => sectionForm(section),
+        onDrop: (spot) => addMeeting(section, spot),
+      };
+    });
+    return [
+      { heading: 'Courses: drag to add a section', items: courses },
+      { heading: 'Sections: drag to add a meeting', items: sections },
+    ];
+  }
+
+  /** Saves a drag on the grid that moves one of a section's weekly meetings. */
+  function moveMeeting(section, index, to) {
     const moved = { pattern: 'WEEKLY', day: to.day, start: to.start, end: to.end };
-    const name = `${section.courseCode} · ${section.sectionNumber}`;
-    if (term.status === 'PUBLISHED'
-      && !confirm(`Move ${name} to ${meetingLabel(moved)}? This term is published, so those affected get a notice.`)) {
+    const meetings = section.meetings.map((meeting, i) => (i === index ? moved : asSent(meeting)));
+    saveMeetings(section, meetings, `Move ${sectionName(section)} to ${meetingLabel(moved)}?`,
+      `${sectionName(section)} moved to ${meetingLabel(moved)}.`);
+  }
+
+  /** Saves a section dropped from the list: it keeps its meetings and gets one more weekly meeting. */
+  function addMeeting(section, to) {
+    const added = { pattern: 'WEEKLY', day: to.day, start: to.start, end: to.end };
+    const same = section.meetings.some((meeting) => meeting.pattern === 'WEEKLY' && meeting.day === added.day
+      && hhmm(meeting.start) === added.start && hhmm(meeting.end) === added.end);
+    if (same) {
+      status.textContent = `${sectionName(section)} already meets ${meetingLabel(added)}.`;
+      return;
+    }
+    saveMeetings(section, [...section.meetings.map(asSent), added], `Add a meeting to ${sectionName(section)} on ${meetingLabel(added)}?`,
+      `${sectionName(section)} now also meets ${meetingLabel(added)}.`);
+  }
+
+  /**
+   * Puts the section back whole with the new meetings, so the server checks it like any other edit and re-runs
+   * conflict detection. The answer says if the change caused a conflict.
+   */
+  async function saveMeetings(section, meetings, question, done) {
+    const { term } = state;
+    if (term.status === 'PUBLISHED' && !confirm(`${question} This term is published, so those affected get a notice.`)) {
       render(); // put the block back
       return;
     }
     const openBefore = new Set(state.conflicts.map((conflict) => conflict.id));
-    const meetings = section.meetings.map((meeting, i) => (i === index ? moved
-      : { ...meeting, start: hhmm(meeting.start), end: hhmm(meeting.end) }));
     try {
-      await put(`/api/terms/${encodeURIComponent(term.id)}/sections/${encodeURIComponent(section.id)}`, {
+      await api.saveSection(term.id, section.id, {
         subjectId: section.subjectId, sectionNumber: section.sectionNumber, roomId: section.roomId,
         instructorIds: section.instructors.map((person) => person.id), meetings, equipment: section.equipment,
       });
       messages.replaceChildren();
       await selectTerm(term.id);
       const caused = state.conflicts.filter((conflict) => !openBefore.has(conflict.id)).length;
-      status.textContent = `${name} moved to ${meetingLabel(moved)}.`
-        + (caused ? ` This caused ${caused === 1 ? '1 new conflict' : `${caused} new conflicts`}; see Conflicts.` : '');
+      status.textContent = done + (caused ? ` This caused ${plural(caused, 'new conflict')}; see Conflicts.` : '');
     } catch (error) {
       render();
       showError(error);
@@ -294,19 +360,6 @@ export function timetableScreen(user, setTopbar) {
 
   function sectionsWithoutRoom() {
     return state.sections.filter((section) => !section.roomId).length;
-  }
-
-  function sectionRow(section) {
-    const label = `${section.courseCode} section ${section.sectionNumber}`;
-    return el('tr', {},
-      el('td', {}, section.courseCode),
-      el('td', {}, section.sectionNumber),
-      el('td', {}, section.roomName ?? el('span', { class: 'tag cancelled' }, 'No room')),
-      el('td', {}, section.instructors.map((person) => person.name).join(', ')),
-      el('td', {}, section.meetings.map((meeting) => el('div', { class: 'nowrap' }, meetingLabel(meeting)))),
-      el('td', { class: 'row-actions' },
-        el('button', { class: 'btn small', type: 'button', 'aria-label': `Edit ${label}`, onclick: () => sectionForm(section) }, 'Edit'),
-        el('button', { class: 'btn quiet small', type: 'button', 'aria-label': `Remove ${label}`, onclick: () => removeSection(section) }, 'Remove')));
   }
 
   function newTerm() {
@@ -320,10 +373,10 @@ export function timetableScreen(user, setTopbar) {
         field('Last day', input('endDate', { type: 'date', required: true })),
       ],
       onSubmit: async (form) => {
-        const term = await post('/api/terms', {
+        const term = await api.createTerm({
           name: form.get('name').trim(), startDate: form.get('startDate'), endDate: form.get('endDate'),
         });
-        state.terms = [term, ...state.terms].sort((a, b) => b.startDate.localeCompare(a.startDate));
+        state.terms = sortNewestFirst([term, ...state.terms]);
         await selectTerm(term.id);
       },
     });
@@ -351,8 +404,8 @@ export function timetableScreen(user, setTopbar) {
         if (!published && form.get('startDate') !== term.startDate) changes.startDate = form.get('startDate');
         if (!published && form.get('endDate') !== term.endDate) changes.endDate = form.get('endDate');
         if (!Object.keys(changes).length) return;
-        Object.assign(term, await patch(`/api/terms/${encodeURIComponent(term.id)}`, changes));
-        state.terms.sort((a, b) => b.startDate.localeCompare(a.startDate));
+        Object.assign(term, await api.updateTerm(term.id, changes));
+        state.terms = sortNewestFirst(state.terms);
         messages.replaceChildren();
         render();
       },
@@ -367,8 +420,8 @@ export function timetableScreen(user, setTopbar) {
       submitLabel: 'Copy term',
       body: [field('Name of the copy', input('name', { required: true, maxlength: 100, value: `${term.name} (copy)` }))],
       onSubmit: async (form) => {
-        const copy = await post(`/api/terms/${encodeURIComponent(term.id)}/copy`, { name: form.get('name').trim() });
-        state.terms = [copy, ...state.terms].sort((a, b) => b.startDate.localeCompare(a.startDate));
+        const copy = await api.copyTerm(term.id, form.get('name').trim());
+        state.terms = sortNewestFirst([copy, ...state.terms]);
         messages.replaceChildren();
         await selectTerm(copy.id);
       },
@@ -378,12 +431,11 @@ export function timetableScreen(user, setTopbar) {
   async function publishTerm() {
     const { term } = state;
     const noRoom = sectionsWithoutRoom();
-    const warning = noRoom > 0 ? `${countLabel(noRoom)} still ${noRoom === 1 ? 'has' : 'have'} no room. ` : '';
+    const warning = noRoom > 0 ? `${plural(noRoom, 'section')} still ${noRoom === 1 ? 'has' : 'have'} no room. ` : '';
     if (!confirm(`${warning}Publish ${term.name}? Students and instructors will see it in their calendars, and it can no longer be deleted.`)) return;
-    const path = `/api/terms/${encodeURIComponent(term.id)}/publish`;
     let published;
     try {
-      published = await post(path);
+      published = await api.publishTerm(term.id);
     } catch (error) {
       // Open High-severity conflicts answer 409 and need a second, explicit yes (FR4.7).
       if (error.status !== 409 || !confirm(error.message)) {
@@ -391,7 +443,7 @@ export function timetableScreen(user, setTopbar) {
         return;
       }
       try {
-        published = await post(`${path}?confirm=true`);
+        published = await api.publishTerm(term.id, true);
       } catch (retryError) {
         showError(retryError);
         return;
@@ -404,9 +456,9 @@ export function timetableScreen(user, setTopbar) {
 
   async function deleteTerm() {
     const { term, sections } = state;
-    if (!confirm(`Delete the draft ${term.name} and its ${countLabel(sections.length)}? This can’t be undone.`)) return;
+    if (!confirm(`Delete the draft ${term.name} and its ${plural(sections.length, 'section')}? This can’t be undone.`)) return;
     try {
-      await del(`/api/terms/${encodeURIComponent(term.id)}`);
+      await api.deleteTerm(term.id);
       messages.replaceChildren();
       state.terms = state.terms.filter((item) => item.id !== term.id);
       await selectTerm(state.terms[0]?.id);
@@ -420,7 +472,7 @@ export function timetableScreen(user, setTopbar) {
     const warning = term.status === 'PUBLISHED' ? ' Those affected will get a cancellation notice.' : '';
     if (!confirm(`Remove ${section.courseCode} section ${section.sectionNumber}?${warning}`)) return;
     try {
-      await del(`/api/terms/${encodeURIComponent(term.id)}/sections/${encodeURIComponent(section.id)}`);
+      await api.removeSection(term.id, section.id);
       messages.replaceChildren();
       await selectTerm(term.id);
     } catch (error) {
@@ -428,8 +480,11 @@ export function timetableScreen(user, setTopbar) {
     }
   }
 
-  /** Adds a section, or edits one if given. Subject and number identify a section, so they can't be edited. */
-  function sectionForm(section) {
+  /**
+   * Adds a section, or edits one if given. Subject and number identify a section, so they can't be edited.
+   * preset fills in a new section: { subjectId, meeting } from a course dragged onto the grid.
+   */
+  function sectionForm(section, preset = {}) {
     const { term } = state;
     const meetingsBox = el('div', { class: 'stack small' });
     const meetings = [];
@@ -441,7 +496,12 @@ export function timetableScreen(user, setTopbar) {
       meetings.push(entry);
       meetingsBox.append(entry.row);
     };
-    (section?.meetings ?? [{ pattern: 'WEEKLY', day: 'MONDAY', start: '09:00', end: '09:50' }]).forEach(addMeeting);
+    (section?.meetings ?? [preset.meeting ?? { pattern: 'WEEKLY', day: 'MONDAY', start: '09:00', end: '09:50' }]).forEach(addMeeting);
+    const subjectId = preset.subjectId ?? state.subjects[0]?.id;
+    const numberInput = input('sectionNumber', { required: true, maxlength: 10, value: nextSectionNumber(state.sections, subjectId) });
+    const subjectSelect = select('subjectId', state.subjects.map((subject) => [subject.id, `${subject.courseCode}: ${subject.title}`]), subjectId, {
+      onchange: () => { numberInput.value = nextSectionNumber(state.sections, subjectSelect.value); },
+    });
 
     const rooms = state.rooms.filter((room) => room.status === 'AVAILABLE' || room.id === section?.roomId);
     const roomOptions = rooms.map((room) => [room.id, `${room.name} (${room.capacity} seats)`]);
@@ -453,8 +513,8 @@ export function timetableScreen(user, setTopbar) {
       note: term.status === 'PUBLISHED' ? 'This term is published, so changing the room, times or instructors sends a notice to those affected.' : null,
       submitLabel: section ? 'Save changes' : 'Add section',
       body: [
-        !section && field('Subject', select('subjectId', state.subjects.map((subject) => [subject.id, `${subject.courseCode}: ${subject.title}`]))),
-        !section && field('Section number', input('sectionNumber', { required: true, maxlength: 10, value: '01' })),
+        !section && field('Subject', subjectSelect),
+        !section && field('Section number', numberInput),
         field('Room', select('roomId', [['', 'Choose a room'], ...roomOptions], section?.roomId ?? '', { required: true })),
         el('fieldset', { class: 'group' },
           el('legend', {}, 'Instructors'),
@@ -487,11 +547,10 @@ export function timetableScreen(user, setTopbar) {
             .map((item) => ({ equipmentId: item.id, units: Number(form.get(`units-${item.id}`)) }))
             .filter((need) => need.units > 0),
         };
-        const termPath = `/api/terms/${encodeURIComponent(term.id)}/sections`;
         if (section) {
-          await put(`${termPath}/${encodeURIComponent(section.id)}`, { ...body, subjectId: section.subjectId, sectionNumber: section.sectionNumber });
+          await api.saveSection(term.id, section.id, { ...body, subjectId: section.subjectId, sectionNumber: section.sectionNumber });
         } else {
-          await post(termPath, { ...body, subjectId: form.get('subjectId'), sectionNumber: form.get('sectionNumber') });
+          await api.addSection(term.id, { ...body, subjectId: form.get('subjectId'), sectionNumber: form.get('sectionNumber') });
         }
         await selectTerm(term.id);
       },

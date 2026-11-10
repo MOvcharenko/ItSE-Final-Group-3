@@ -1,52 +1,18 @@
-import { chosenTermId, download, getJson, rememberTerm } from './api.js';
 import { addDays, dateRange, dayHeading, hourLabel, longDate, minutes, shortDate, timeRange, today } from './dates.js';
-import { banner, el } from './dom.js';
-import { openDetails } from './forms.js';
+import { banner, dataTable, el } from './dom.js';
+import { field, openDetails, select } from './forms.js';
+import { latestOnly, Superseded } from './http.js';
+import { plural } from './labels.js';
+import { layoutOverlaps } from './layout.js';
 import { noticesPanel } from './notices.js';
+import { api } from './scheduling-api.js';
+import { initialTerm, termLabel, termPicker } from './terms.js';
 
 const VIEWS = [['DAY', 'Day'], ['WEEK', 'Week'], ['TERM', 'Term']];
 const FIRST_HOUR = 8;
 const LAST_HOUR = 18;
 const HOUR_PX = 72; // keep in step with --hour in app.css
 const MIN_BLOCK_PX = 24;
-
-/** The term to open with: the one running today (Published first), else the next to start, else the latest. */
-export function defaultTerm(terms, date) {
-  const running = terms.filter((term) => term.startDate <= date && date <= term.endDate);
-  const byStart = [...terms].sort((a, b) => a.startDate.localeCompare(b.startDate));
-  return running.find((term) => term.status === 'PUBLISHED') ?? running[0]
-    ?? byStart.find((term) => term.startDate > date) ?? byStart.at(-1);
-}
-
-/** Gives events that overlap on one day their own columns, side by side. */
-export function layoutOverlaps(events) {
-  const sorted = [...events].sort((a, b) => minutes(a.start) - minutes(b.start) || minutes(a.end) - minutes(b.end));
-  const placed = [];
-  let cluster = [];
-  let clusterEnd = -1;
-  const closeCluster = () => {
-    const columnEnds = [];
-    const start = placed.length;
-    for (const event of cluster) {
-      let column = columnEnds.findIndex((end) => end <= minutes(event.start));
-      if (column < 0) column = columnEnds.length;
-      columnEnds[column] = minutes(event.end);
-      placed.push({ event, column });
-    }
-    for (let i = start; i < placed.length; i++) placed[i].columns = columnEnds.length;
-    cluster = [];
-  };
-  for (const event of sorted) {
-    if (minutes(event.start) >= clusterEnd) {
-      closeCluster();
-      clusterEnd = -1;
-    }
-    cluster.push(event);
-    clusterEnd = Math.max(clusterEnd, minutes(event.end));
-  }
-  closeCluster();
-  return placed;
-}
 
 // How courses are named on the calendar. A per-viewer choice, so it lives in this browser only.
 const COURSE_DISPLAYS = [['BOTH', 'Code and name'], ['CODE', 'Code'], ['NAME', 'Name']];
@@ -102,7 +68,6 @@ function instructorNames(event) {
 
 function showEventDetails(event) {
   const kind = { WEEKLY: 'Weekly class', ONE_TIME: 'One-time meeting', EXAM: 'Exam' }[event.pattern];
-  const term = event.termStatus === 'DRAFT' ? `${event.termName} (Draft)` : event.termName;
   openDetails(`${event.courseCode}, section ${event.sectionNumber}`, [
     ['Course', event.courseTitle],
     ['Type', kind],
@@ -110,7 +75,7 @@ function showEventDetails(event) {
     ['Room', roomLabel(event)],
     ['Building', event.building ?? '—'],
     [event.instructors.length === 1 ? 'Instructor' : 'Instructors', instructorNames(event) || '—'],
-    ['Term', term],
+    ['Term', termLabel({ name: event.termName, status: event.termStatus })],
   ]);
 }
 
@@ -168,36 +133,25 @@ function timeGrid(view) {
             .map((placed) => eventBlock(placed, firstHour)))))));
 }
 
+/** The Term view: one row per meeting, the date only on the first of each day. */
 function termList(view) {
-  let lastDate = null;
-  const rows = view.events.map((event) => {
-    const date = event.date === lastDate ? '' : shortDate(event.date);
-    lastDate = event.date;
-    return el('tr', {},
-      el('td', { class: 'date' }, date),
-      el('td', { class: 'time' }, timeRange(event.start, event.end)),
-      el('td', {}, courseNodes(event)),
-      el('td', {}, roomLabel(event)),
-      el('td', {}, instructorNames(event)));
-  });
-  return el('div', { class: 'scroll-x' },
-    el('table', {},
-      el('thead', {}, el('tr', {}, ['Date', 'Time', 'Course', 'Room', 'Instructors'].map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, rows)));
-}
-
-function filterField(id, label, onchange) {
-  const select = el('select', { id, onchange });
-  return { select, field: el('div', { class: 'field' }, el('label', { for: id }, label), select) };
+  const firstOfDay = new Set(view.events.filter((event, index) => event.date !== view.events[index - 1]?.date));
+  return dataTable([
+    { label: 'Date', class: 'date', cell: (event) => (firstOfDay.has(event) ? shortDate(event.date) : '') },
+    { label: 'Time', class: 'time', cell: (event) => timeRange(event.start, event.end) },
+    { label: 'Course', cell: courseNodes },
+    { label: 'Room', cell: roomLabel },
+    { label: 'Instructors', cell: instructorNames },
+  ], view.events);
 }
 
 /** Fills a filter from what has been seen so far, keeping the choice even if the current view doesn't contain it. */
-function fillFilter(select, allLabel, known) {
-  const value = select.value;
+function fillFilter(control, allLabel, known) {
+  const value = control.value;
   const options = [...known.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  select.replaceChildren(el('option', { value: '' }, allLabel),
+  control.replaceChildren(el('option', { value: '' }, allLabel),
     ...options.map(([optionValue, label]) => el('option', { value: optionValue }, label)));
-  select.value = value;
+  control.value = value;
 }
 
 /** The calendar screen for any role. The API limits the events to what this account may see. */
@@ -205,30 +159,29 @@ export function calendarScreen(user, setTopbar) {
   // A phone is too narrow for a week without sideways scrolling.
   const state = { view: matchMedia('(max-width: 760px)').matches ? 'DAY' : 'WEEK', date: today(), term: null };
   const known = { course: new Map(), instructor: new Map(), building: new Map(), room: new Map() };
-  let terms = [];
-  let requestNumber = 0;
+  const fetchView = latestOnly((filters) => api.calendar(filters));
 
   const body = el('div', { 'aria-live': 'polite' }, el('div', { class: 'loading' }, 'Loading calendar…'));
   const messages = el('div', { class: 'messages' });
   const heading = el('h2');
   const meta = el('span', { class: 'meta' });
 
-  const termSelect = el('select', { id: 'term', 'aria-label': 'Term', onchange: () => selectTerm(termSelect.value) });
-  const termTag = el('span', { class: 'tag' });
+  const picker = termPicker((term) => selectTerm(term));
   const exportButton = el('button', { class: 'btn', type: 'button', disabled: true, onclick: exportTerm }, 'Export .ics');
-  const course = filterField('filter-course', 'Course', load);
-  const instructor = filterField('filter-instructor', 'Instructor', load);
-  const building = filterField('filter-building', 'Building', load);
-  const room = filterField('filter-room', 'Room', load);
+  const filterSelects = {
+    course: select('course', [], '', { id: 'filter-course', onchange: load }),
+    instructor: select('instructor', [], '', { id: 'filter-instructor', onchange: load }),
+    building: select('building', [], '', { id: 'filter-building', onchange: load }),
+    room: select('room', [], '', { id: 'filter-room', onchange: load }),
+  };
   // A display setting, not a filter, so it sits in the panel header rather than among the filters.
-  const displaySelect = el('select', {
+  const displaySelect = select('courseDisplay', COURSE_DISPLAYS, courseDisplay, {
     id: 'course-display',
     onchange: () => {
       saveCourseDisplay(displaySelect.value);
       if (lastView) showView(lastView);
     },
-  }, COURSE_DISPLAYS.map(([value, label]) => el('option', { value }, label)));
-  displaySelect.value = courseDisplay;
+  });
   let lastView = null;
 
   const viewButtons = VIEWS.map(([value, label]) => el('button', {
@@ -246,36 +199,29 @@ export function calendarScreen(user, setTopbar) {
     load();
   }
 
+  /** The term and the filters chosen; blank filters are left out of the request. */
   function filters() {
-    const params = new URLSearchParams({ termId: state.term.id });
-    if (course.select.value) params.set('course', course.select.value);
-    if (instructor.select.value) params.set('instructor', instructor.select.value);
-    if (building.select.value) params.set('building', building.select.value);
-    if (room.select.value) params.set('room', room.select.value);
-    return params;
+    return { termId: state.term.id, ...Object.fromEntries(Object.entries(filterSelects).map(([key, control]) => [key, control.value])) };
   }
 
   function hasFilters() {
-    return Boolean(course.select.value || instructor.select.value || building.select.value || room.select.value);
+    return Object.values(filterSelects).some((control) => control.value);
   }
 
   function clearFilters() {
-    course.select.value = instructor.select.value = building.select.value = room.select.value = '';
+    Object.values(filterSelects).forEach((control) => { control.value = ''; });
     load();
   }
 
-  function selectTerm(id) {
-    state.term = terms.find((term) => term.id === id);
-    rememberTerm(id);
-    clearFilterChoices();
-    if (state.date < state.term.startDate || state.date > state.term.endDate) state.date = state.term.startDate;
-    showTermInTopbar();
-    load();
-  }
-
-  function clearFilterChoices() {
+  function selectTerm(term) {
+    state.term = term;
     Object.values(known).forEach((values) => values.clear());
-    course.select.value = instructor.select.value = building.select.value = room.select.value = '';
+    Object.values(filterSelects).forEach((control) => { control.value = ''; });
+    if (state.date < term.startDate || state.date > term.endDate) state.date = term.startDate;
+    picker.show(term);
+    exportButton.disabled = false;
+    setTopbar([picker.select, picker.tag], [exportButton]);
+    load();
   }
 
   function emptyState() {
@@ -302,18 +248,18 @@ export function calendarScreen(user, setTopbar) {
       if (event.building) known.building.set(event.building, event.building);
       if (event.roomId) known.room.set(event.roomId, event.roomName);
     });
-    fillFilter(course.select, 'All courses',
+    fillFilter(filterSelects.course, 'All courses',
       new Map([...known.course].map(([code, title]) => [code, courseName(code, title)])));
-    fillFilter(instructor.select, 'All instructors', known.instructor);
-    fillFilter(building.select, 'All buildings', known.building);
-    fillFilter(room.select, 'All rooms', known.room);
+    fillFilter(filterSelects.instructor, 'All instructors', known.instructor);
+    fillFilter(filterSelects.building, 'All buildings', known.building);
+    fillFilter(filterSelects.room, 'All rooms', known.room);
 
     heading.textContent = {
       DAY: longDate(view.from),
       WEEK: dateRange(view.from, view.to),
       TERM: `${state.term.name}: ${dateRange(view.from, view.to)}`,
     }[view.scope];
-    meta.textContent = view.events.length === 1 ? '1 meeting' : `${view.events.length} meetings`;
+    meta.textContent = plural(view.events.length, 'meeting');
 
     // An empty list here means the SIS gave no answer, not that the student has no classes.
     messages.replaceChildren(...(view.enrollmentAvailable ? [] : [banner(
@@ -325,31 +271,24 @@ export function calendarScreen(user, setTopbar) {
   }
 
   async function load() {
-    const thisRequest = ++requestNumber;
     viewButtons.forEach((button, index) => button.setAttribute('aria-pressed', String(VIEWS[index][0] === state.view)));
     stepper.hidden = state.view === 'TERM';
-    const params = filters();
-    params.set('view', state.view);
-    params.set('date', state.date);
     body.setAttribute('aria-busy', 'true');
     try {
-      const view = await getJson(`/api/calendar?${params}`);
-      if (thisRequest === requestNumber) showView(view);
+      showView(await fetchView({ ...filters(), view: state.view, date: state.date }));
     } catch (error) {
-      if (thisRequest === requestNumber) {
-        body.replaceChildren();
-        messages.replaceChildren(banner(error.message, 'Try again', load));
-      }
-    } finally {
-      if (thisRequest === requestNumber) body.removeAttribute('aria-busy');
+      if (error instanceof Superseded) return;
+      body.replaceChildren();
+      messages.replaceChildren(banner(error.message, 'Try again', load));
     }
+    body.removeAttribute('aria-busy');
   }
 
   async function exportTerm() {
     exportButton.disabled = true;
     try {
       const safeName = state.term.name.replace(/[^\w -]+/g, '').trim() || 'calendar';
-      await download(`/api/calendar.ics?${filters()}`, `${safeName}.ics`);
+      await api.downloadCalendar(filters(), `${safeName}.ics`);
       messages.replaceChildren();
     } catch (error) {
       messages.replaceChildren(banner(error.message));
@@ -358,18 +297,10 @@ export function calendarScreen(user, setTopbar) {
     }
   }
 
-  function showTermInTopbar() {
-    const draft = state.term.status === 'DRAFT';
-    termTag.className = draft ? 'tag draft' : 'tag published';
-    termTag.textContent = draft ? 'Draft' : 'Published';
-    termSelect.value = state.term.id;
-    exportButton.disabled = false;
-    setTopbar([termSelect, termTag], [exportButton]);
-  }
-
   async function start() {
+    let terms;
     try {
-      terms = await getJson('/api/terms');
+      terms = await api.terms();
       // Instructors can list Drafts, but only Published terms have anything on their calendar.
       if (user.role !== 'SCHEDULER') terms = terms.filter((term) => term.status === 'PUBLISHED');
     } catch (error) {
@@ -384,19 +315,16 @@ export function calendarScreen(user, setTopbar) {
           : 'Your schedule will appear here once a term is published.'));
       return;
     }
-    termSelect.replaceChildren(...[...terms].sort((a, b) => b.startDate.localeCompare(a.startDate))
-      .map((term) => el('option', { value: term.id }, term.status === 'DRAFT' ? `${term.name} (Draft)` : term.name)));
-    state.term = terms.find((term) => term.id === chosenTermId()) ?? defaultTerm(terms, state.date);
-    if (state.date < state.term.startDate || state.date > state.term.endDate) state.date = state.term.startDate;
-    showTermInTopbar();
+    picker.setTerms(terms);
     toolbar.hidden = false;
-    load();
+    selectTerm(initialTerm(terms));
   }
 
   const toolbar = el('div', { class: 'toolbar calendar-filters', hidden: true },
     el('div', { class: 'segmented', role: 'group', 'aria-label': 'Calendar view' }, viewButtons),
     el('div', { class: 'spacer' }),
-    course.field, instructor.field, building.field, room.field);
+    field('Course', filterSelects.course), field('Instructor', filterSelects.instructor),
+    field('Building', filterSelects.building), field('Room', filterSelects.room));
   const calendarPanel = el('section', { class: 'panel' },
     el('div', { class: 'panel-head' }, el('div', { class: 'period' }, stepper, heading),
       el('div', { class: 'head-tools' }, meta,

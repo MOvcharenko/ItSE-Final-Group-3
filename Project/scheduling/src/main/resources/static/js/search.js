@@ -1,17 +1,16 @@
-import { getJson } from './api.js';
-import { ROOM_TYPES, roomTypeLabel } from './catalog.js';
 import { whenLabel } from './dates.js';
-import { banner, el } from './dom.js';
+import { banner, dataTable, el } from './dom.js';
 import { field, input, select } from './forms.js';
+import { latestOnly, Superseded } from './http.js';
+import { plural, ROOM_TYPES, roomTypeLabel } from './labels.js';
+import { api } from './scheduling-api.js';
 
 const KINDS = {
   ROOM: {
-    path: '/api/search/rooms',
     note: 'Classes and approved bookings make a room busy. Pending requests don’t.',
     noun: ['room', 'rooms'],
   },
   EQUIPMENT: {
-    path: '/api/search/equipment',
     note: 'Classes and approved bookings use up units. Pending requests don’t.',
     noun: ['item', 'items'],
   },
@@ -30,12 +29,12 @@ function fillNames(control, anyLabel, names) {
 }
 
 /**
- * Finds rooms or equipment free for a time window. Returns the panel, plus setCatalog to offer the equipment names and
- * item types that exist (the API matches a whole name, so free text would easily find nothing) and refresh to repeat
- * the last search after a decision has changed what is free. onRequest gets the kind, the resource and the window
- * that was searched.
+ * Finds rooms or equipment free for a time window, to request one. Returns the panel, plus setCatalog to offer the
+ * equipment names and item types that exist (the API matches a whole name, so free text would easily find nothing)
+ * and refresh to repeat the last search after a decision has changed what is free. onRequest gets the kind, the
+ * resource and the window that was searched.
  */
-export function availabilityPanel(onRequest) {
+export function availabilitySearchPanel(onRequest) {
   const kind = select('kind', [['ROOM', 'Room'], ['EQUIPMENT', 'Equipment']], 'ROOM', { onchange: showKind });
   const start = input('start', { type: 'datetime-local', required: true });
   const end = input('end', { type: 'datetime-local', required: true });
@@ -47,8 +46,8 @@ export function availabilityPanel(onRequest) {
   const itemFields = [field('Item type', itemType)];
   const note = el('span', { class: 'meta' });
   const results = el('div', { 'aria-live': 'polite' });
+  const findFree = latestOnly((searched, filters) => api.searchFree(searched, filters));
   let lastSearch = null;
-  let requestNumber = 0;
 
   /** Results for the other kind no longer answer what is being asked, so they go. */
   function showKind() {
@@ -56,7 +55,7 @@ export function availabilityPanel(onRequest) {
     roomFields.forEach((item) => { item.hidden = !rooms; });
     itemFields.forEach((item) => { item.hidden = rooms; });
     note.textContent = KINDS[kind.value].note;
-    requestNumber++;
+    findFree.drop();
     lastSearch = null;
     results.replaceChildren();
   }
@@ -74,16 +73,13 @@ export function availabilityPanel(onRequest) {
   }
 
   async function search(criteria) {
-    const thisRequest = ++requestNumber;
     const { kind: searched, ...filters } = criteria;
-    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
     try {
-      const found = await getJson(`${KINDS[searched].path}?${params}`);
-      if (thisRequest !== requestNumber) return; // a newer search has taken over
+      const found = await findFree(searched, filters);
       lastSearch = criteria;
       results.replaceChildren(showResults(found, criteria));
     } catch (error) {
-      if (thisRequest !== requestNumber) return;
+      if (error instanceof Superseded) return; // a newer search has taken over
       lastSearch = null;
       results.replaceChildren(el('div', { class: 'panel-body' }, banner(error.message)));
     }
@@ -98,43 +94,42 @@ export function availabilityPanel(onRequest) {
         'Try another time, or fewer requirements.');
     }
     return el('div', {},
-      el('p', { class: 'result-count' }, `${found.length === 1 ? `1 ${one}` : `${found.length} ${many}`} free, ${when}`),
+      el('p', { class: 'result-count' }, `${plural(found.length, one, many)} free, ${when}`),
       criteria.kind === 'ROOM' ? roomTable(found, criteria) : equipmentTable(found, criteria));
   }
 
-  function table(columns, rows) {
-    return el('table', { class: 'cards' },
-      el('thead', {}, el('tr', {}, [...columns, ''].map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, rows));
-  }
-
-  function requestCell(resource, criteria) {
-    return el('td', { class: 'row-actions' },
-      el('button', {
+  function requestColumn(criteria) {
+    return {
+      label: '',
+      class: 'row-actions',
+      cell: (resource) => el('button', {
         class: 'btn small',
         type: 'button',
         'aria-label': `Request ${resource.name}`,
         onclick: () => onRequest(criteria.kind, resource, criteria),
-      }, 'Request'));
+      }, 'Request'),
+    };
   }
 
   function roomTable(rooms, criteria) {
-    return table(['Room', 'Building', 'Capacity', 'Type', 'Equipment'], rooms.map((room) => el('tr', {},
-      el('td', { 'data-label': 'Room' }, room.name),
-      el('td', { 'data-label': 'Building' }, room.building),
-      el('td', { 'data-label': 'Capacity' }, String(room.capacity)),
-      el('td', { 'data-label': 'Type' }, roomTypeLabel(room.roomType)),
-      el('td', { 'data-label': 'Equipment' }, room.fixedEquipment?.length ? room.fixedEquipment.join(', ') : '—'),
-      requestCell(room, criteria))));
+    return dataTable([
+      { label: 'Room', cell: (room) => room.name },
+      { label: 'Building', cell: (room) => room.building },
+      { label: 'Capacity', cell: (room) => String(room.capacity) },
+      { label: 'Type', cell: (room) => roomTypeLabel(room.roomType) },
+      { label: 'Equipment', cell: (room) => (room.fixedEquipment?.length ? room.fixedEquipment.join(', ') : '—') },
+      requestColumn(criteria),
+    ], rooms, { cards: true });
   }
 
   function equipmentTable(items, criteria) {
-    return table(['Item', 'Type', 'Free units', 'Home location'], items.map((item) => el('tr', {},
-      el('td', { 'data-label': 'Item' }, item.name),
-      el('td', { 'data-label': 'Type' }, item.itemType),
-      el('td', { 'data-label': 'Free units' }, `${item.freeUnits} of ${item.unitCount}`),
-      el('td', { 'data-label': 'Home location' }, item.homeLocation ?? '—'),
-      requestCell(item, criteria))));
+    return dataTable([
+      { label: 'Item', cell: (item) => item.name },
+      { label: 'Type', cell: (item) => item.itemType },
+      { label: 'Free units', cell: (item) => `${item.freeUnits} of ${item.unitCount}` },
+      { label: 'Home location', cell: (item) => item.homeLocation ?? '—' },
+      requestColumn(criteria),
+    ], items, { cards: true });
   }
 
   const element = el('section', { class: 'panel' },

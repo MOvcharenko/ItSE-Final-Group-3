@@ -1,6 +1,6 @@
-import { getJson, post } from './api.js';
 import { dateTime } from './dates.js';
 import { banner, el } from './dom.js';
+import { api } from './scheduling-api.js';
 
 /** Sent with the unread count whenever the panel knows a newer one, for the sidebar. */
 export const UNREAD_COUNTED = 'notices:unread-counted';
@@ -16,7 +16,7 @@ export function noticesPanel() {
 
   async function load() {
     try {
-      notices = await getJson('/api/notices');
+      notices = await api.notices();
       render();
     } catch (error) {
       meta.textContent = '';
@@ -26,7 +26,7 @@ export function noticesPanel() {
 
   async function markRead(notice) {
     try {
-      Object.assign(notice, await post(`/api/notices/${encodeURIComponent(notice.id)}/read`));
+      Object.assign(notice, await api.markNoticeRead(notice.id));
       render();
       heading.focus(); // the button that had focus is gone
     } catch (error) {

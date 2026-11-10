@@ -209,9 +209,16 @@ The web front end is implemented as plain HTML, CSS, and JavaScript modules with
 
 | File | Purpose |
 |---|---|
-| `js/app.js` | Startup, role-based navigation, sign-in handling |
-| `js/api.js` | API communication and authentication token handling |
-| `js/dom.js` | DOM helper functions |
+| `js/app.js` | Startup and role-based navigation (which role sees which screen) |
+| `js/shell.js` | Page frames: the sign-in landing page and the sidebar/top bar around every screen |
+| `js/scheduling-api.js` | Every call to the REST API, named for what it does; the only file that knows the URLs |
+| `js/http.js` | Transport: adds the token, turns errors into plain-language messages, returns to sign-in on a 401 |
+| `js/auth.js` | Signing in and out: test accounts and the OpenID Connect flow with PKCE |
+| `js/session.js` | What the browser tab remembers: token, chosen term, section to open next |
+| `js/terms.js` | The shared term picker and the rule for which term a screen opens with |
+| `js/labels.js` | Shared wording: plurals, days, room types, meeting labels |
+| `js/layout.js` | Places overlapping events side by side in both time grids |
+| `js/dom.js` | DOM helper functions and the shared table builder |
 | `js/dates.js` | Local date formatting and time handling |
 | `js/forms.js` | Reusable form behaviors and validation messaging |
 | `js/calendar.js` | Calendar views and notifications |

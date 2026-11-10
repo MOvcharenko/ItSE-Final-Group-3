@@ -1,6 +1,6 @@
-import { download, upload } from './api.js';
-import { banner, el } from './dom.js';
+import { banner, dataTable, el } from './dom.js';
 import { field, input, select } from './forms.js';
+import { api } from './scheduling-api.js';
 
 const MAX_FILE_BYTES = 1024 * 1024; // Spring's multipart limit
 
@@ -26,14 +26,13 @@ const TYPES = {
 function resultsTable(batch) {
   return el('div', {},
     el('p', { class: 'result-count' }, `${batch.fileName}: ${batch.added} added, ${batch.needsReview} need${batch.needsReview === 1 ? 's' : ''} review`),
-    el('table', { class: 'cards' },
-      el('thead', {}, el('tr', {}, ['Data row', 'Result', 'What to fix'].map((name) => el('th', { scope: 'col' }, name)))),
-      el('tbody', {}, batch.rows.map((row) => el('tr', {},
-        el('td', { 'data-label': 'Data row' }, String(row.rowNumber)),
-        el('td', { 'data-label': 'Result' }, row.outcome === 'ADDED'
-          ? el('span', { class: 'tag ok' }, 'Added')
-          : el('span', { class: 'tag draft' }, 'Needs review')),
-        el('td', { 'data-label': 'What to fix' }, row.reason ?? '—'))))));
+    dataTable([
+      { label: 'Data row', cell: (row) => String(row.rowNumber) },
+      { label: 'Result', cell: (row) => (row.outcome === 'ADDED'
+        ? el('span', { class: 'tag ok' }, 'Added')
+        : el('span', { class: 'tag draft' }, 'Needs review')) },
+      { label: 'What to fix', cell: (row) => row.reason ?? '—' },
+    ], batch.rows, { cards: true }));
 }
 
 /** Template download, file upload and row-by-row results. onImported redraws whatever the import may have added to. */
@@ -56,7 +55,7 @@ export function importPanel(onImported) {
 
   async function downloadTemplate() {
     try {
-      await download(`/api/import/templates/${type.value}`, `${type.value}-template.csv`);
+      await api.downloadImportTemplate(type.value);
     } catch (error) {
       showError(error.message);
     }
@@ -71,7 +70,7 @@ export function importPanel(onImported) {
     }
     submit.disabled = true;
     try {
-      const batch = await upload(`/api/import/${type.value}`, chosen);
+      const batch = await api.importFile(type.value, chosen);
       results.replaceChildren(batch.rows.length
         ? resultsTable(batch)
         : el('div', { class: 'empty' }, el('strong', {}, `${batch.fileName} has no rows to import`), 'It only has a header row.'));
