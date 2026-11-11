@@ -1,8 +1,10 @@
 package accounts;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,6 +22,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
@@ -57,7 +60,7 @@ class SignInIT {
 
 	private static final String ISSUER = "http://localhost:9000";
 	private static final String CLIENT = "scheduling-web";
-	private static final String APP = "http://localhost:8080";
+	private static final String APP = "http://localhost:8081";
 	private static final String REDIRECT = APP + "/signin-callback.html";
 
 	@Autowired
@@ -94,9 +97,9 @@ class SignInIT {
 	void registration() {
 		RegisteredClient client = clients.findByClientId(CLIENT);
 		assertThat(client.getRedirectUris()).containsExactlyInAnyOrder(
-				"http://localhost:8080/signin-callback.html", "http://127.0.0.1:8080/signin-callback.html");
+				"http://localhost:8081/signin-callback.html", "http://127.0.0.1:8081/signin-callback.html");
 		assertThat(client.getPostLogoutRedirectUris()).containsExactlyInAnyOrder(
-				"http://localhost:8080/", "http://127.0.0.1:8080/");
+				"http://localhost:8081/", "http://127.0.0.1:8081/");
 		assertThat(client.getScopes()).containsExactlyInAnyOrder("openid", "profile", "email");
 	}
 
@@ -109,6 +112,45 @@ class SignInIT {
 				.andExpect(header().string("Access-Control-Allow-Origin", APP));
 		mvc.perform(options("/oauth2/token").header("Origin", "http://evil.example").header("Access-Control-Request-Method", "POST"))
 				.andExpect(status().isForbidden());
+	}
+
+	// --- the staff list the scheduling server reads ------------------------
+
+	@Test
+	@DisplayName("The scheduling server reads enabled staff with its own client: a new instructor is listed before signing in")
+	void staffList() throws Exception {
+		String instructor = accounts.byUsername(newAccount("INSTRUCTOR", false, "first-password")).orElseThrow().id();
+		String disabled = accounts.byUsername(newAccount("INSTRUCTOR", false, "first-password")).orElseThrow().id();
+		service.setEnabled("U01", disabled, false);
+		String student = accounts.byUsername(newAccount("STUDENT", false, "first-password")).orElseThrow().id();
+
+		String staff = mvc.perform(get("/api/staff").header("Authorization", "Bearer " + directoryToken()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.id == 'U01')].departments[*]").value(containsInAnyOrder("CS", "MATH")))
+				.andExpect(jsonPath("$[?(@.id == 'U02')].department").value("MATH"))
+				.andExpect(jsonPath("$[?(@.id == '" + instructor + "')].role").value("INSTRUCTOR"))
+				.andReturn().getResponse().getContentAsString();
+		assertThat(JsonPath.<List<String>>read(staff, "$[*].id")).doesNotContain("U03", disabled, student);
+	}
+
+	@Test
+	@DisplayName("The scheduling server's token has no person in it and is not addressed to the API")
+	void directoryTokenIsNotForTheApi() throws Exception {
+		JWTClaimsSet claims = verified(directoryToken());
+		assertThat(claims.getSubject()).isEqualTo("scheduling-directory");
+		assertThat(claims.getAudience()).containsExactly(SignInSecurityConfig.DIRECTORY_AUDIENCE);
+		assertThat(claims.getClaims()).doesNotContainKeys("role", "name");
+	}
+
+	@Test
+	@DisplayName("The staff list refuses no token, a person's token, and a wrong client secret")
+	void staffListRefused() throws Exception {
+		mvc.perform(get("/api/staff")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/staff").header("Authorization", "Bearer " + accessToken("m.brooks", "Scheduler#2026")))
+				.andExpect(status().isUnauthorized());
+		mvc.perform(post("/oauth2/token").with(httpBasic("scheduling-directory", "wrong"))
+						.param("grant_type", "client_credentials").param("scope", SignInSecurityConfig.DIRECTORY_SCOPE))
+				.andExpect(status().isUnauthorized());
 	}
 
 	// --- sign-in and tokens -----------------------------------------------
@@ -427,6 +469,15 @@ class SignInIT {
 	private String accessToken(String username, String password) throws Exception {
 		String verifier = verifier();
 		return JsonPath.read(exchange(authorize(signIn(username, password), challenge(verifier)), verifier), "$.access_token");
+	}
+
+	/** The scheduling server's own token, from the client-credentials grant, as its directory client gets it. */
+	private String directoryToken() throws Exception {
+		String response = mvc.perform(post("/oauth2/token").with(httpBasic("scheduling-directory", "demo-directory-secret"))
+						.param("grant_type", "client_credentials").param("scope", SignInSecurityConfig.DIRECTORY_SCOPE))
+				.andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		return JsonPath.read(response, "$.access_token");
 	}
 
 	/** The token's claims, after checking it is signed with this server's key, as the scheduling module checks it. */

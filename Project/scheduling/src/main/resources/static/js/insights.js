@@ -5,9 +5,9 @@ import { api } from './scheduling-api.js';
 import { initialTerm, termPicker } from './terms.js';
 
 const INSTRUCTOR_STATUS = {
-  UNDERUSED: ['tag insight-alert', 'Under-used (<50%)', 'var(--color-amber, #d97706)'],
-  CONFIRMATION: ['tag insight-success', 'Full load (≥80%)', 'var(--color-green, #16a34a)'],
-  HEALTHY: ['tag', 'Healthy', 'var(--color-blue, #2563eb)'],
+  UNDERUSED: ['tag insight-alert', 'Under-used (<50%)', 'var(--draft-ink)'],
+  CONFIRMATION: ['tag insight-success', 'Full load (≥80%)', 'var(--ok-ink)'],
+  HEALTHY: ['tag', 'Healthy', 'var(--accent)'],
 };
 const ROOM_STATUS = {
   UNDERUSED: ['tag insight-alert', 'Room underused'],

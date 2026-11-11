@@ -26,6 +26,7 @@ import jakarta.validation.constraints.Pattern;
  * @param apiAudience    the {@code aud} of access tokens; the scheduling module accepts only this
  * @param accessTokenTtl how long a sign-in lasts. A disabled account keeps a token it already has until then
  * @param signingKeyFile where the token-signing key is kept, so sign-ins survive a restart
+ * @param directory      how the scheduling server signs in to read the staff list ({@code GET /api/staff})
  * @param seedAccounts   accounts created when there are none yet (first start only)
  */
 @Validated
@@ -38,6 +39,7 @@ public record AccountsProperties(
 		@NotBlank String apiAudience,
 		@NotNull Duration accessTokenTtl,
 		@NotNull Path signingKeyFile,
+		@NotNull @Valid Directory directory,
 		List<@Valid SeedAccount> seedAccounts) {
 
 	public AccountsProperties {
@@ -60,6 +62,18 @@ public record AccountsProperties(
 
 	private static String withoutTrailingSlash(String url) {
 		return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+	}
+
+	/**
+	 * The scheduling server's own client, for the client-credentials grant. It has no user: it only reads the staff
+	 * list, so an account created here can be assigned to classes before that person has ever signed in.
+	 *
+	 * @param clientId     the scheduling module's {@code scheduling.directory.client-id}
+	 * @param clientSecret encoded like a password, e.g. {@code {bcrypt}...}; the scheduling module holds the plain one
+	 */
+	public record Directory(
+			@NotBlank String clientId,
+			@NotBlank @Pattern(regexp = "\\{[a-z0-9]+\\}.+", message = "must be encoded, such as {bcrypt}... or {noop}...") String clientSecret) {
 	}
 
 	/** A first-start account. The password must already be encoded. */

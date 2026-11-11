@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import core.NoticeMessages;
@@ -26,6 +27,7 @@ import domain.NoticeEvent;
 import domain.ResourceStatus;
 import domain.Role;
 import domain.TermStatus;
+import integration.StaffDirectory;
 import persistence.AppUserEntity;
 import persistence.AppUserRepository;
 import persistence.EquipmentRepository;
@@ -63,11 +65,12 @@ public class TimetableService {
 	private final ConflictService conflicts;
 	private final NoticeService notices;
 	private final CurrentUserProvider currentUser;
+	private final StaffDirectory staffDirectory;
 	private final Clock clock;
 
 	public TimetableService(TermRepository terms, SectionRepository sections, SubjectRepository subjects,
 			RoomRepository rooms, EquipmentRepository equipment, AppUserRepository users, ConflictService conflicts,
-			NoticeService notices, CurrentUserProvider currentUser, Clock clock) {
+			NoticeService notices, CurrentUserProvider currentUser, StaffDirectory staffDirectory, Clock clock) {
 		this.terms = terms;
 		this.sections = sections;
 		this.subjects = subjects;
@@ -77,18 +80,22 @@ public class TimetableService {
 		this.conflicts = conflicts;
 		this.notices = notices;
 		this.currentUser = currentUser;
+		this.staffDirectory = staffDirectory;
 		this.clock = clock;
 	}
 
 	/**
 	 * Everyone a section can name as an instructor, which is the same check as {@link #checkedInstructors}. Roles come
-	 * only from tokens and are not stored, so staff who don't teach are listed too.
+	 * only from tokens and are not stored, so staff who don't teach are listed too. Staff created in the Core Platform
+	 * are brought in first, so they can be chosen before they have signed in. No transaction here: that is a remote
+	 * call, and the refresh saves in its own.
 	 */
-	@Transactional(readOnly = true)
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public List<SectionView.InstructorView> listInstructors() {
 		if (!currentUser.get().isScheduler()) {
 			throw new AccessDeniedException("Only Schedulers can list instructors.");
 		}
+		staffDirectory.refreshProfiles();
 		return users.findAll().stream()
 				.map(user -> new SectionView.InstructorView(user.getId(), user.getDisplayName()))
 				.sorted(Comparator.comparing(SectionView.InstructorView::name))

@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
@@ -36,6 +38,7 @@ import org.springframework.security.access.AccessDeniedException;
 import domain.ImportType;
 import domain.RoomType;
 import domain.RowOutcome;
+import integration.StaffDirectory;
 import persistence.AppUserEntity;
 import persistence.AppUserRepository;
 import persistence.ImportBatchEntity;
@@ -62,6 +65,7 @@ class ImportServiceImplTest {
 	ObjectProvider<SchedulePlacement> placement = mock(ObjectProvider.class);
 	SchedulePlacement timetable = mock(SchedulePlacement.class);
 	UserProfiles profiles = mock(UserProfiles.class);
+	StaffDirectory staffDirectory = mock(StaffDirectory.class);
 	Clock clock = Clock.fixed(Instant.parse("2026-10-24T10:00:00Z"), ZoneOffset.UTC);
 
 	@BeforeEach
@@ -81,7 +85,7 @@ class ImportServiceImplTest {
 
 	private ImportServiceImpl as(CurrentUser who) {
 		return new ImportServiceImpl(catalog, batches, rooms, subjects, users, placement, profiles,
-				TestUsers.caller(who), clock);
+				TestUsers.caller(who), staffDirectory, clock);
 	}
 
 	private ImportBatchEntity savedBatch() {
@@ -223,6 +227,18 @@ class ImportServiceImplTest {
 	}
 
 	// ---------------- ready-made schedule (FR3.4, FR3.7) ----------------
+
+	@Test
+	@DisplayName("A schedule brings in the Core Platform's staff before matching names, so a new instructor is recognized")
+	void scheduleRefreshesStaffFirst() {
+		InOrder order = inOrder(staffDirectory, users);
+
+		as(TestUsers.MAYA).importFile("s.csv", ImportType.READY_MADE_SCHEDULE, SCHEDULE
+				+ "HIST 120,World History,MWF,09:00,09:50,Hale Hall 204,Dr. Patel,Fall2026\n");
+
+		order.verify(staffDirectory).refreshProfiles();
+		order.verify(users).findByDisplayNameIgnoreCase("Dr. Patel");
+	}
 
 	@Test
 	@DisplayName("TC-FR3.4a: HIST 120 and PSY 220 are placed; CS 450L (unrecognized room) is Needs review 'room not recognized'")

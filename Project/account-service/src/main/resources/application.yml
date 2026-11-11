@@ -7,7 +7,7 @@ server:
   servlet:
     session:
       # Browsers share cookies between ports of the same host, so a distinct name keeps this sign-in session apart
-      # from anything the scheduling app on localhost:8080 sets.
+      # from anything the scheduling apps on localhost:8080 and 8081 set.
       cookie:
         name: ACCOUNTS_SESSION
 
@@ -22,9 +22,10 @@ spring:
 accounts:
   issuer: http://localhost:9000
   # Where the Academic Scheduling UI is opened: sign-in returns there, and its token request is allowed from there.
+  # 8081 is the scheduling module's "accounts" profile, so it can run next to the default profile on 8080.
   app-urls:
-    - http://localhost:8080
-    - http://127.0.0.1:8080
+    - http://localhost:8081
+    - http://127.0.0.1:8081
   # How the scheduling UI identifies itself, and the audience the scheduling API accepts; must match its
   # scheduling.auth.client-id / scheduling.auth.scope and spring.security.oauth2.resourceserver.jwt.audiences.
   client-id: scheduling-web
@@ -34,6 +35,12 @@ accounts:
   # A disabled account cannot sign in again, and loses a token it already holds when that token expires.
   access-token-ttl: 1h
   signing-key-file: ./data/signing-key.json
+  # The scheduling server reads the staff list (GET /api/staff) as this client, so accounts created here can be
+  # assigned to classes straight away. Must match the scheduling module's scheduling.directory.* settings.
+  # A demo secret: in a real deployment use a {bcrypt} hash here and keep the plain secret out of version control.
+  directory:
+    client-id: scheduling-directory
+    client-secret: "{noop}demo-directory-secret"
   # Created on first start only. Passwords are BCrypt hashes of the demo passwords in the README; change them under
   # Account → Change password.
   seed-accounts:

@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.oauth2.jwt.Jwt;
 
+import domain.Role;
 import persistence.AppUserEntity;
 import persistence.AppUserRepository;
 
@@ -75,6 +78,37 @@ class ProfileSyncTest {
 		sync.sync(token("U03", "STUDENT").claim("name", "Jordan Ellis").build());
 
 		verifyNoInteractions(users);
+	}
+
+	@Test
+	@DisplayName("The staff list creates profiles for people who have not signed in, with a scheduler's departments")
+	void staffListCreatesProfiles() {
+		when(users.findById(any())).thenReturn(Optional.empty());
+
+		sync.sync(List.of(
+				new ProfileSync.Staff("T20", "Pat New", "pat@univ.edu", Role.INSTRUCTOR, "PHYS", List.of()),
+				new ProfileSync.Staff("T21", "Sam Lead", " ", Role.SCHEDULER, null, List.of("HIST")),
+				new ProfileSync.Staff("T22", "A Student", null, Role.STUDENT, null, List.of())));
+
+		ArgumentCaptor<AppUserEntity> saved = ArgumentCaptor.forClass(AppUserEntity.class);
+		verify(users, times(2)).save(saved.capture());
+		assertThat(saved.getAllValues()).extracting(AppUserEntity::getId).containsExactly("T20", "T21");
+		assertThat(saved.getAllValues().get(0).getDepartment()).isEqualTo("PHYS");
+		assertThat(saved.getAllValues().get(1).getEmail()).as("blank email is none").isNull();
+	}
+
+	@Test
+	@DisplayName("The staff list is complete for each person, so a removed email or department is removed here too")
+	void staffListOverwrites() {
+		AppUserEntity profile = new AppUserEntity("U02", "L. Bianchi", "l.bianchi@univ.edu", "MATH");
+		when(users.findById("U02")).thenReturn(Optional.of(profile));
+
+		sync.sync(List.of(new ProfileSync.Staff("U02", "Laura Bianchi", null, Role.INSTRUCTOR, null, null)));
+
+		assertThat(profile.getDisplayName()).isEqualTo("Laura Bianchi");
+		assertThat(profile.getEmail()).isNull();
+		assertThat(profile.getDepartment()).isNull();
+		verify(users, never()).save(any());
 	}
 
 	@Test

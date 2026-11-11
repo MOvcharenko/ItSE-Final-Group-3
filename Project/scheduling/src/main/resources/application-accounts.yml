@@ -2,12 +2,16 @@
 # This module only checks its tokens, exactly as it would the real Core Platform's.
 #   terminal 1:  cd Project/account-service && ./mvnw spring-boot:run
 #   terminal 2:  cd Project/scheduling && ./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts
-#   browser:     http://localhost:8080/
-# Data is kept in ./data, the same database as the default profile.
+#   browser:     http://localhost:8081/
+# Port 8081, so the default profile (test-account picker) can run on 8080 at the same time. Both use the same database
+# in ./data (AUTO_SERVER lets two apps open it at once), so they show the same timetable.
+
+server:
+  port: 8081
 
 spring:
   datasource:
-    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE
     username: sa
     password: ""
   security:
@@ -20,3 +24,11 @@ spring:
 scheduling:
   auth:
     account-uri: http://localhost:9000/account   # "Account" link: change password, manage accounts
+  # The account service's staff list, read with this server's own client (client credentials), so an instructor
+  # created there can be assigned to classes before they have signed in here. Must match the account service's
+  # accounts.directory.* settings. A demo secret: in a real deployment pass it in from outside, never commit it.
+  directory:
+    uri: http://localhost:9000/api/staff
+    token-uri: http://localhost:9000/oauth2/token
+    client-id: scheduling-directory
+    client-secret: demo-directory-secret

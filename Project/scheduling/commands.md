@@ -35,15 +35,17 @@ Accounts and passwords are not part of this module: they belong to the Core Plat
 
 ```powershell
 cd ..\account-service; .\mvnw.cmd spring-boot:run          # terminal 1, port 9000
-cd ..\scheduling; .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=accounts'   # terminal 2
+cd ..\scheduling; .\mvnw.cmd spring-boot:run '-Dspring-boot.run.profiles=accounts'   # terminal 2, port 8081
 ```
 
 ```sh
 cd ../account-service && ./mvnw spring-boot:run          # terminal 1, port 9000
-cd ../scheduling && ./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts   # terminal 2
+cd ../scheduling && ./mvnw spring-boot:run -Dspring-boot.run.profiles=accounts   # terminal 2, port 8081
 ```
 
-Open `http://localhost:8080/`; it sends you to the account service's sign-in form:
+The `accounts` profile runs on port **8081**, so the default profile (the test-account picker) can stay running on 8080 next to it, for example to show both in a demo. Both open the same database in `./data`, so they show the same timetable.
+
+Open `http://localhost:8081/`; it sends you to the account service's sign-in form:
 
 | Username | Password | Role |
 |---|---|---|
@@ -51,12 +53,12 @@ Open `http://localhost:8080/`; it sends you to the account service's sign-in for
 | `l.bianchi` | `Instructor#2026` | Instructor |
 | `j.ellis` | `Student#2026` | Student |
 
-These are demo passwords. **Account** in the sidebar opens the account service, where you change your password; Maya can also create, reset and disable accounts there. A new instructor can be assigned to sections once they have signed in. If the account service is not running, the sign-in page says it cannot be reached.
+These are demo passwords. **Account** in the sidebar opens the account service, where you change your password; Maya can also create, reset and disable accounts there. An instructor or scheduler created there can be assigned to sections straight away, without signing in first: the instructor list and schedule import read the account service's staff list (`GET http://localhost:9000/api/staff`, which this app calls with its own client, `scheduling.directory.*`). Disabled accounts and students are not listed. If the account service is not running, the sign-in page says it cannot be reached.
 
 Check that it's running, from a second terminal:
 
 ```powershell
-curl.exe http://localhost:8080/actuator/health
+curl.exe http://localhost:8081/actuator/health
 ```
 
 You should see `"status":"UP"`.

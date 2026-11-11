@@ -1,10 +1,22 @@
 name: CI
 
+# Runs only when code changes: anything in the two apps except Markdown files (README, commands.md, plans),
+# or this workflow itself. Reports, logs, journals and design documents elsewhere in the repo never start it.
 on:
   push:
     branches: [main, "feature/**"]
+    paths:
+      - "Project/scheduling/**"
+      - "Project/account-service/**"
+      - ".github/workflows/ci.yml"
+      - "!**/*.md"
   pull_request:
     branches: [main]
+    paths:
+      - "Project/scheduling/**"
+      - "Project/account-service/**"
+      - ".github/workflows/ci.yml"
+      - "!**/*.md"
 
 jobs:
   verify:

@@ -301,7 +301,7 @@ td select { padding: 3px 6px; font-size: 12px; }
 
 /* Optimization Insights (NFR4.4, FR5) */
 .insight-panel {
-  border-left: 4px solid var(--color-blue, #2563eb);
+  border-left: 4px solid var(--accent);
 }
 .insight-cards-grid {
   display: grid;
@@ -309,8 +309,9 @@ td select { padding: 3px 6px; font-size: 12px; }
   gap: 16px;
 }
 .insight-card {
-  background: var(--surface-card, #f8fafc);
-  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px 16px;
   display: flex;
@@ -332,19 +333,19 @@ td select { padding: 3px 6px; font-size: 12px; }
 .insight-card-message {
   margin: 0;
   font-size: 0.925rem;
-  color: var(--text-muted, #475569);
+  color: var(--ink-2);
   line-height: 1.4;
 }
 .insight-tag {
-  background: #e0f2fe;
-  color: #0369a1;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font-size: 0.75rem;
   padding: 2px 6px;
   border-radius: 4px;
 }
 .insight-conflict-tag {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
   font-size: 0.75rem;
   padding: 2px 6px;
   border-radius: 4px;
@@ -354,17 +355,14 @@ td select { padding: 3px 6px; font-size: 12px; }
 .insight-conflict-tag:hover {
   text-decoration: underline;
 }
-.insight-alert {
-  background: #fef3c7;
-  color: #b45309;
+.insight-alert,
+.insight-amber {
+  background: var(--draft-soft);
+  color: var(--draft-ink);
 }
 .insight-success {
-  background: #dcfce7;
-  color: #15803d;
-}
-.insight-amber {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--ok-soft);
+  color: var(--ok-ink);
 }
 .progress-wrapper {
   display: flex;
@@ -374,7 +372,7 @@ td select { padding: 3px 6px; font-size: 12px; }
 .progress-track {
   flex: 1;
   height: 8px;
-  background: #e2e8f0;
+  background: var(--line-soft);
   border-radius: 4px;
   overflow: hidden;
   min-width: 60px;
@@ -401,28 +399,28 @@ td select { padding: 3px 6px; font-size: 12px; }
   transition: background 0.15s ease;
 }
 .avail-OPEN {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--ok-soft);
+  color: var(--ok-ink);
 }
 .avail-PREFER {
-  background: #e0f2fe;
-  color: #0369a1;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 .avail-UNAVAILABLE {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
 }
 
 /* Availability Lens Overlay (FR1.4) */
 .busy.overlay-unavailable {
-  background: rgba(239, 68, 68, 0.25);
-  border-left: 3px solid #ef4444;
-  color: #991b1b;
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  color: var(--warn-ink);
   z-index: 1;
 }
 .busy.overlay-prefer {
-  background: rgba(59, 130, 246, 0.15);
-  border-left: 3px solid #3b82f6;
-  color: #1e40af;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  color: var(--accent-ink);
   z-index: 1;
 }

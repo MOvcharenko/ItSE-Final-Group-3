@@ -5,7 +5,8 @@
 
 spring:
   datasource:
-    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    # AUTO_SERVER lets the "accounts" profile (port 8081) open the same database while this app runs on 8080.
+    url: jdbc:h2:file:./data/scheduling;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE
     username: sa
     password: ""
   h2:

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.ParseException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -18,10 +19,16 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
@@ -67,6 +74,11 @@ public class SignInSecurityConfig {
 
 	private static final Logger log = LoggerFactory.getLogger(SignInSecurityConfig.class);
 
+	/** What the scheduling server's own client may do: read the staff list. */
+	static final String DIRECTORY_SCOPE = "directory.read";
+	/** The {@code aud} of the scheduling server's own tokens, so they can only be used here, never on the API. */
+	static final String DIRECTORY_AUDIENCE = "account-directory";
+
 	@Bean
 	@Order(1)
 	public SecurityFilterChain authorizationServerEndpoints(HttpSecurity http, AccountStore accounts,
@@ -111,6 +123,29 @@ public class SignInSecurityConfig {
 		return http.build();
 	}
 
+	/**
+	 * The staff list for the scheduling server ({@link StaffController}). No person signs in here: the caller is the
+	 * scheduling server's own client, with a token from the client-credentials grant that carries
+	 * {@value #DIRECTORY_SCOPE} and is addressed to {@value #DIRECTORY_AUDIENCE}.
+	 */
+	@Bean
+	@Order(3)
+	public SecurityFilterChain staffDirectory(HttpSecurity http, JWKSource<SecurityContext> jwkSource,
+			AccountsProperties properties) throws Exception {
+		NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSource(jwkSource).build();
+		decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+				JwtValidators.createDefaultWithIssuer(properties.issuer()),
+				new JwtClaimValidator<List<String>>(JwtClaimNames.AUD,
+						aud -> aud != null && aud.contains(DIRECTORY_AUDIENCE))));
+		http
+			.securityMatcher("/api/**")
+			.csrf(csrf -> csrf.disable())
+			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+			.authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_" + DIRECTORY_SCOPE))
+			.oauth2ResourceServer(server -> server.jwt(jwt -> jwt.decoder(decoder)));
+		return http.build();
+	}
+
 	/** Only the token endpoint is called cross-origin; everything else is a browser navigation. */
 	@Bean
 	public CorsConfigurationSource corsConfigurationSource(AccountsProperties properties) {
@@ -140,7 +175,15 @@ public class SignInSecurityConfig {
 				.clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(false).build())
 				.tokenSettings(TokenSettings.builder().accessTokenTimeToLive(properties.accessTokenTtl()).build())
 				.build();
-		return new InMemoryRegisteredClientRepository(client);
+		RegisteredClient directory = RegisteredClient.withId(properties.directory().clientId())
+				.clientId(properties.directory().clientId())
+				.clientSecret(properties.directory().clientSecret())
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC) // a server: it keeps a secret
+				.authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+				.scope(DIRECTORY_SCOPE)
+				.tokenSettings(TokenSettings.builder().accessTokenTimeToLive(Duration.ofMinutes(5)).build())
+				.build();
+		return new InMemoryRegisteredClientRepository(client, directory);
 	}
 
 	/** A fixed issuer: the scheduling module checks every token's {@code iss} against it. */
@@ -174,6 +217,11 @@ public class SignInSecurityConfig {
 			boolean accessToken = OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType());
 			boolean idToken = "id_token".equals(context.getTokenType().getValue());
 			if (!accessToken && !idToken) {
+				return;
+			}
+			// The scheduling server's own token: no person, so no account claims, and an audience the API refuses.
+			if (AuthorizationGrantType.CLIENT_CREDENTIALS.equals(context.getAuthorizationGrantType())) {
+				context.getClaims().audience(new ArrayList<>(List.of(DIRECTORY_AUDIENCE)));
 				return;
 			}
 			if (accessToken) {

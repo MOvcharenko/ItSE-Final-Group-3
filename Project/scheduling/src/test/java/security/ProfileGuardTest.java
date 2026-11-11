@@ -81,7 +81,11 @@ class ProfileGuardTest {
 	@Test
 	@DisplayName("The accounts profile trusts Project/account-service as its Core Platform, and has no dev login")
 	void accountsProfileTrustsTheAccountService() {
-		try (ConfigurableApplicationContext context = defaultProfileApp().profiles("accounts").run(inMemoryDatabase("guard-accounts"))) {
+		// The profile's own port (8081) would win over defaultProfileApp's server.port=0, so it is given here too.
+		try (ConfigurableApplicationContext context = defaultProfileApp().profiles("accounts")
+				.run(inMemoryDatabase("guard-accounts"), "--server.port=0")) {
+			assertThat(context.getEnvironment().getProperty("scheduling.directory.uri"))
+				.isEqualTo("http://localhost:9000/api/staff");
 			assertThat(context.getEnvironment().getProperty("spring.security.oauth2.resourceserver.jwt.issuer-uri"))
 				.isEqualTo("http://localhost:9000");
 			assertThat(context.getBeansOfType(JwtDecoder.class)).hasSize(1);

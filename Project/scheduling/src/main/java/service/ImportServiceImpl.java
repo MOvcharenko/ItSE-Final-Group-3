@@ -26,6 +26,7 @@ import core.importing.ParsedFile;
 import core.importing.RowResult;
 import domain.ImportType;
 import domain.RowOutcome;
+import integration.StaffDirectory;
 import persistence.AppUserEntity;
 import persistence.AppUserRepository;
 import persistence.ImportBatchEntity;
@@ -57,11 +58,12 @@ public class ImportServiceImpl implements ImportService {
 	private final ObjectProvider<SchedulePlacement> placement;
 	private final UserProfiles profiles;
 	private final Caller caller;
+	private final StaffDirectory staffDirectory;
 	private final Clock clock;
 
 	public ImportServiceImpl(CatalogService catalog, ImportBatchRepository batches, RoomRepository rooms,
 			SubjectRepository subjects, AppUserRepository users, ObjectProvider<SchedulePlacement> placement,
-			UserProfiles profiles, Caller caller, Clock clock) {
+			UserProfiles profiles, Caller caller, StaffDirectory staffDirectory, Clock clock) {
 		this.catalog = catalog;
 		this.batches = batches;
 		this.rooms = rooms;
@@ -70,6 +72,7 @@ public class ImportServiceImpl implements ImportService {
 		this.placement = placement;
 		this.profiles = profiles;
 		this.caller = caller;
+		this.staffDirectory = staffDirectory;
 		this.clock = clock;
 	}
 
@@ -123,6 +126,8 @@ public class ImportServiceImpl implements ImportService {
 		if (file.isRejected()) {
 			throw new BusinessRuleException(file.fileError());
 		}
+		// Instructors are matched by name, so staff just created in the Core Platform are brought in first.
+		staffDirectory.refreshProfiles();
 		// Looked up once per file; matching ignores case and spacing ("Fall2026" = "Fall 2026").
 		Map<String, RoomEntity> roomsByKey = new HashMap<>();
 		rooms.findAll().forEach(r -> roomsByKey.put(Keys.of(r.getName()), r));
