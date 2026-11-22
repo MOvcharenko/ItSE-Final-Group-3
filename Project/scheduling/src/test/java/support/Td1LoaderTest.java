@@ -87,6 +87,8 @@ class Td1LoaderTest {
 			st.executeUpdate("INSERT INTO conflict (id, term_id, conflict_type, severity, explanation, fingerprint, detected_at, room_id) "
 					+ "VALUES ('C-X','T-2026-FALL','ROOM_DOUBLE_BOOKING','HIGH','x','fp-1','2026-10-24 12:00:00','R-LABB')");
 			st.executeUpdate("INSERT INTO conflict_section VALUES ('C-X','SEC-106')");
+			st.executeUpdate("INSERT INTO conflict_meeting (conflict_id, section_id, pattern, day_of_week, start_time, end_time) "
+					+ "VALUES ('C-X','SEC-106','WEEKLY','MONDAY','13:00:00','14:15:00')");
 			st.executeUpdate("INSERT INTO audit_log_entry VALUES ('AU-X','C-X','ROOM_DOUBLE_BOOKING','x','U01','2026-10-24 12:05:00','special event')");
 			st.executeUpdate("INSERT INTO insight_suggestion (id, term_id, axis, measure, room_id, related_conflict_id, message, created_at) "
 					+ "VALUES ('I-X','T-2026-FALL','ROOM_CAPACITY','FILL','R-CC301','C-X','m','2026-10-24 12:00:00')");

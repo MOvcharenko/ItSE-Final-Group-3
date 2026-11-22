@@ -1,5 +1,6 @@
 package core.conflict;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -19,7 +20,8 @@ public record DetectedConflict(
 		String instructorId,
 		String equipmentId,
 		String bookingId,
-		List<String> sectionIds
+		List<String> sectionIds,
+		List<ConflictMeeting> meetings
 ) {
 	public DetectedConflict {
 		Objects.requireNonNull(type, "ConflictType must not be null");
@@ -27,6 +29,26 @@ public record DetectedConflict(
 		Objects.requireNonNull(explanation, "Explanation must not be null");
 		Objects.requireNonNull(fingerprint, "Fingerprint must not be null");
 		sectionIds = sectionIds == null ? List.of() : List.copyOf(sectionIds);
+		meetings = meetings == null ? List.of() : List.copyOf(meetings);
+	}
+
+	/** Without meetings: the conflict is about the sections as a whole (capacity exceeded). */
+	public DetectedConflict(ConflictType type, Severity severity, String explanation, String fingerprint, String roomId,
+			String instructorId, String equipmentId, String bookingId, List<String> sectionIds) {
+		this(type, severity, explanation, fingerprint, roomId, instructorId, equipmentId, bookingId, sectionIds, List.of());
+	}
+
+	/** The same conflict, naming the meetings that clash. */
+	public DetectedConflict withMeetings(List<ConflictMeeting> clashing) {
+		return new DetectedConflict(type, severity, explanation, fingerprint, roomId, instructorId, equipmentId,
+				bookingId, sectionIds, clashing);
+	}
+
+	/** The same conflict found again at another pair of meetings: their meetings together, each once. */
+	public DetectedConflict mergedWith(DetectedConflict again) {
+		List<ConflictMeeting> all = new ArrayList<>(meetings);
+		again.meetings().stream().filter(meeting -> !all.contains(meeting)).forEach(all::add);
+		return withMeetings(all);
 	}
 
 	public static DetectedConflict roomDoubleBooking(

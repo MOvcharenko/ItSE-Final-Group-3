@@ -23,9 +23,12 @@ export function bookingsScreen(user, setTopbar) {
 
   const requestButton = el('button', { class: 'btn primary', type: 'button', disabled: true, onclick: () => requestForm() }, 'Request booking');
   setTopbar([], [requestButton]);
-  const search = availabilitySearchPanel((type, resource, { start, end }) => requestForm({ type, resourceId: resource.id, start, end }));
+  // A Scheduler mostly comes here to decide requests, so the search starts folded and the list shows what waits;
+  // an Instructor comes to find something free to request.
+  const search = availabilitySearchPanel((type, resource, { start, end }) => requestForm({ type, resourceId: resource.id, start, end }),
+    { open: !scheduler });
   const statusFilter = select('status',
-    [['', 'All statuses'], ...Object.entries(STATUS_TAGS).map(([value, [, label]]) => [value, label])], '',
+    [['', 'All statuses'], ...Object.entries(STATUS_TAGS).map(([value, [, label]]) => [value, label])], scheduler ? 'PENDING' : '',
     { 'aria-label': 'Filter by status', onchange: load });
   // A newer filter choice takes over from a list still on its way.
   const fetchAll = latestOnly((status) => Promise.all([api.bookings(status), api.rooms(), api.equipment()]));

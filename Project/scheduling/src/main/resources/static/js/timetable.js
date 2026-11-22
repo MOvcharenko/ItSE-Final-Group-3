@@ -1,8 +1,8 @@
 import { dateRange } from './dates.js';
-import { banner, dataTable, el } from './dom.js';
-import { field, input, openForm, select } from './forms.js';
+import { actionMenu, banner, dataTable, el } from './dom.js';
+import { checklist, field, input, openForm, select } from './forms.js';
 import { latestOnly, Superseded } from './http.js';
-import { DAYS, meetingLabel, plural } from './labels.js';
+import { DAYS, isWeekend, labelOf, meetingLabel, meetingLines, plural } from './labels.js';
 import { api } from './scheduling-api.js';
 import { rememberTerm, takeSectionToOpen } from './session.js';
 import { initialTerm, sortNewestFirst, termPicker } from './terms.js';
@@ -15,6 +15,12 @@ const hhmm = (time) => time.slice(0, 5);
 const sectionName = (section) => `${section.courseCode} · ${section.sectionNumber}`;
 const toMinutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 const asSent = (meeting) => ({ ...meeting, start: hhmm(meeting.start), end: hhmm(meeting.end) });
+
+/** Asks before a class goes on Saturday or Sunday. days: the weekend days it would newly meet on. */
+function confirmWeekend(days) {
+  const names = days.map((day) => labelOf(DAYS, day)).join(' and ');
+  return confirm(`Schedule a class on ${names}? Classes normally run Monday to Friday. Are you sure?`);
+}
 
 /** The next free section number for a subject in this term: "01", then "02", and so on. */
 function nextSectionNumber(sections, subjectId) {
@@ -64,7 +70,9 @@ function meetingRow(meeting, term, onRemove) {
 export function timetableScreen(user, setTopbar) {
   const state = { terms: [], term: null, sections: [], conflicts: [], subjects: [], rooms: [], equipment: [], instructors: [] };
   // A phone is too narrow for a week grid, so it starts on the list.
-  const view = { mode: matchMedia('(max-width: 760px)').matches ? 'list' : 'grid', busyInstructor: '', availabilityBlocks: [] };
+  const view = { mode: matchMedia('(max-width: 760px)').matches ? 'list' : 'grid', availabilityBlocks: [], showWeekends: false };
+  // Which sections the grid and the list show. A faculty term has hundreds, so narrowing down is the usual first step.
+  const filter = { words: [], roomId: '', instructorId: '' };
   const messages = el('div', { class: 'messages' });
   const status = el('p', { class: 'status', role: 'status' });
   const panel = el('section', { class: 'panel' }, el('div', { class: 'loading' }, 'Loading timetable…'));
@@ -74,8 +82,27 @@ export function timetableScreen(user, setTopbar) {
   const fetchTerm = latestOnly((term) => (term
     ? Promise.all([api.sections(term.id), api.conflicts(term.id, 'OPEN')])
     : Promise.resolve([[], []])));
-  // The "Show busy times for" lookup, so only the latest choice's answer is shown
+  // The chosen instructor's declared availability, so only the latest choice's answer is shown
   const fetchAvailability = latestOnly((instructorId, termId) => api.instructorAvailability(instructorId, termId));
+
+  // The filter controls live as long as the screen, so typing keeps its focus while the sections redraw.
+  const findBox = el('input', {
+    type: 'search',
+    class: 'find',
+    placeholder: 'Course, section, room or instructor',
+    'aria-label': 'Find sections',
+    oninput: () => {
+      filter.words = findBox.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      showSections();
+    },
+  });
+  const roomFilter = select('filterRoom', [], '', { 'aria-label': 'Room', onchange: () => { filter.roomId = roomFilter.value; showSections(); } });
+  const instructorFilter = select('filterInstructor', [], '', {
+    'aria-label': 'Instructor',
+    onchange: () => chooseInstructor(instructorFilter.value),
+  });
+  const filterCount = el('span', { class: 'filter-count', role: 'status' });
+  const sectionsBox = el('div');
 
   const showError = (error, retry) => messages.replaceChildren(banner(error.message, retry && 'Try again', retry));
 
@@ -111,7 +138,9 @@ export function timetableScreen(user, setTopbar) {
       throw error;
     }
     if (term?.id !== state.term?.id) {
-      view.busyInstructor = '';
+      // Another term has other rooms and people in use, so the filter starts again.
+      Object.assign(filter, { words: [], roomId: '', instructorId: '' });
+      findBox.value = '';
       view.availabilityBlocks = [];
       fetchAvailability.drop(); // an answer still on its way is for the term being left
     }
@@ -140,7 +169,11 @@ export function timetableScreen(user, setTopbar) {
   function setSwitching(switching) {
     panel.inert = switching;
     topbar?.details.forEach((item) => { item.hidden = switching; });
-    topbar?.actions.forEach((button) => { button.disabled = switching; });
+    // A button can be disabled; the term menu can only be made inert.
+    topbar?.actions.forEach((item) => {
+      if ('disabled' in item) item.disabled = switching;
+      else item.inert = switching;
+    });
   }
 
   function render() {
@@ -164,10 +197,14 @@ export function timetableScreen(user, setTopbar) {
     picker.setTerms(state.terms);
     picker.show(term);
     const details = [picker.tag, el('span', { class: 'muted' }, dateRange(term.startDate, term.endDate))];
-    const actions = [newButton,
-      el('button', { class: 'btn', type: 'button', onclick: editTerm }, 'Edit term'),
-      el('button', { class: 'btn', type: 'button', onclick: copyTerm }, 'Copy term'),
-      draft && el('button', { class: 'btn danger-line', type: 'button', onclick: deleteTerm }, 'Delete term'),
+    // Managing terms is occasional, so it waits in one menu; publishing is the step the whole screen works towards.
+    const actions = [
+      actionMenu('Term', [
+        { label: 'New term…', onClick: newTerm },
+        { label: 'Edit term…', onClick: editTerm },
+        { label: 'Copy term…', onClick: copyTerm },
+        draft && { label: 'Delete term…', onClick: deleteTerm, danger: true },
+      ]),
       draft && el('button', { class: 'btn primary', type: 'button', onclick: publishTerm }, 'Publish term')].filter(Boolean);
     topbar = { details, actions };
     setTopbar([picker.select, ...details], actions);
@@ -201,20 +238,90 @@ export function timetableScreen(user, setTopbar) {
         el('button', { class: 'btn primary', type: 'button', onclick: () => sectionForm() }, 'Add the first section'))];
     }
     const noRoom = sectionsWithoutRoom();
+    showSections();
     return [head, status, noRoom > 0 && el('div', { class: 'panel-body' }, banner(
-      `${plural(noRoom, 'section')} ${noRoom === 1 ? 'has' : 'have'} no room, usually because a copied room is out of service. Use Edit to choose one.`)),
-    ...(view.mode === 'grid' ? gridView() : [sectionsTable()])].filter(Boolean);
+      `${plural(noRoom, 'section')} ${noRoom === 1 ? 'has' : 'have'} no room, usually because a copied room is out of service.`,
+      'Show them', showSectionsWithoutRoom)),
+    filterBar(), sectionsBox].filter(Boolean);
   }
 
-  function sectionsTable() {
+  /** The list view with only the sections that have no room, where Edit can give each one. */
+  function showSectionsWithoutRoom() {
+    view.mode = 'list';
+    filter.roomId = 'NONE';
+    render();
+  }
+
+  /** Find, room and instructor: one bar for both the grid and the list, so switching view keeps the same sections. */
+  function filterBar() {
+    const rooms = [...state.rooms].sort((a, b) => a.name.localeCompare(b.name));
+    roomFilter.replaceChildren(...[['', 'All rooms'], ['NONE', 'No room yet'], ...rooms.map((room) => [room.id, room.name])]
+      .map(([value, label]) => el('option', { value }, label)));
+    roomFilter.value = filter.roomId;
+    const people = [...state.instructors].sort((a, b) => a.name.localeCompare(b.name));
+    instructorFilter.replaceChildren(...[['', 'All instructors'], ...people.map((person) => [person.id, person.name])]
+      .map(([value, label]) => el('option', { value }, label)));
+    instructorFilter.value = filter.instructorId;
+    const grid = view.mode === 'grid';
+    return el('div', { class: 'toolbar filter-bar' },
+      findBox, roomFilter, instructorFilter, filterCount,
+      el('div', { class: 'spacer' }),
+      grid && el('label', { class: 'check weekend-toggle' },
+        el('input', {
+          type: 'checkbox',
+          checked: view.showWeekends,
+          onchange: (event) => { view.showWeekends = event.target.checked; render(); },
+        }),
+        'Show weekends'));
+  }
+
+  const filtering = () => filter.words.length > 0 || filter.roomId !== '' || filter.instructorId !== '';
+
+  function clearFilter() {
+    Object.assign(filter, { words: [], roomId: '', instructorId: '' });
+    findBox.value = '';
+    view.availabilityBlocks = [];
+    fetchAvailability.drop();
+    render();
+  }
+
+  /** The words a section can be found by: its course code and title, number, room and instructors. */
+  function searchText(section) {
+    const title = state.subjects.find((subject) => subject.id === section.subjectId)?.title ?? '';
+    return [section.courseCode, title, section.sectionNumber, section.roomName ?? '',
+      ...section.instructors.map((person) => person.name)].join(' ').toLowerCase();
+  }
+
+  function visible(section) {
+    if (filter.roomId === 'NONE' ? section.roomId : filter.roomId && section.roomId !== filter.roomId) return false;
+    if (filter.instructorId && !section.instructors.some((person) => person.id === filter.instructorId)) return false;
+    const text = filter.words.length ? searchText(section) : '';
+    return filter.words.every((word) => text.includes(word));
+  }
+
+  /** Redraws only the grid or the list and the count, so the filter controls above keep their focus. */
+  function showSections() {
+    const shown = state.sections.filter(visible);
+    filterCount.replaceChildren(...(filtering() ? [
+      `${shown.length} of ${plural(state.sections.length, 'section')}`,
+      el('button', { class: 'btn quiet small', type: 'button', onclick: clearFilter }, 'Clear'),
+    ] : []));
+    sectionsBox.replaceChildren(...(view.mode === 'grid' ? gridView() : [sectionsTable(shown)]));
+  }
+
+  function sectionsTable(shown) {
+    if (!shown.length) {
+      return el('div', { class: 'empty' }, el('strong', {}, 'No sections match'),
+        el('button', { class: 'btn', type: 'button', onclick: clearFilter }, 'Show all sections'));
+    }
     return dataTable([
       { label: 'Course', cell: (section) => section.courseCode },
       { label: 'Section', cell: (section) => section.sectionNumber },
       { label: 'Room', cell: (section) => section.roomName ?? el('span', { class: 'tag cancelled' }, 'No room') },
       { label: 'Instructors', cell: (section) => section.instructors.map((person) => person.name).join(', ') },
-      { label: 'Meets', cell: (section) => section.meetings.map((meeting) => el('div', { class: 'nowrap' }, meetingLabel(meeting))) },
+      { label: 'Meets', cell: (section) => meetingLines(section.meetings).map((line) => el('div', { class: 'nowrap' }, line)) },
       { label: '', class: 'row-actions', cell: sectionActions },
-    ], state.sections);
+    ], [...shown].sort((a, b) => sectionName(a).localeCompare(sectionName(b))));
   }
 
   function sectionActions(section) {
@@ -225,61 +332,69 @@ export function timetableScreen(user, setTopbar) {
     ];
   }
 
+  /**
+   * How many open conflicts a meeting is in. A conflict names the meetings that clash, so a section's other meetings
+   * stay clear; one that names none of this section's meetings (capacity exceeded) is about the whole section.
+   */
+  function conflictsOf(section, meeting) {
+    const same = (clash) => clash.pattern === meeting.pattern && hhmm(clash.start) === hhmm(meeting.start)
+      && hhmm(clash.end) === hhmm(meeting.end)
+      && (meeting.pattern === 'WEEKLY' ? clash.dayOfWeek === meeting.day : clash.date === meeting.date);
+    return state.conflicts.filter((conflict) => {
+      if (!conflict.sectionIds.includes(section.id)) return false;
+      const mine = (conflict.meetings ?? []).filter((clash) => clash.sectionId === section.id);
+      return !mine.length || mine.some(same);
+    }).length;
+  }
+
   function gridView() {
-    const conflictCounts = new Map();
-    state.conflicts.forEach((conflict) => conflict.sectionIds.forEach((id) => conflictCounts.set(id, (conflictCounts.get(id) ?? 0) + 1)));
-    const teaching = new Map();
-    state.sections.forEach((section) => section.instructors.forEach((person) => teaching.set(person.id, person.name)));
-    const busyPick = select('busy', [['', 'Nobody'], ...[...teaching].sort((a, b) => a[1].localeCompare(b[1]))], view.busyInstructor, {
-      id: 'busy-instructor',
-      onchange: () => showBusyTimes(busyPick.value),
-    });
-    const dated = datedMeetings(state.sections);
-    const hint = state.sections.length
-      ? 'Drag a course from the list onto a day and time to add a section, or a section to give it another weekly meeting. '
-        + 'Drag a class on the grid to move it. While you drag, times when its instructors or room are already in use are shaded. Click anything to edit it.'
-      : 'Drag a course from the list onto a day and time to add the first section, or click a course to fill in the form.';
+    const dated = datedMeetings(state.sections.filter(visible));
+    const chosen = filter.instructorId && state.instructors.find((person) => person.id === filter.instructorId);
+    const hint = chosen && view.availabilityBlocks.some((block) => block.status !== 'OPEN')
+      ? `Shaded: ${chosen.name}’s declared availability. `
+      : '';
     return [
-      el('div', { class: 'toolbar' },
-        state.sections.length > 0 && field('Show busy times for', busyPick),
-        el('p', { class: 'hint' }, hint)),
+      el('p', { class: 'hint grid-hint' }, hint, state.sections.length
+        ? 'Drag a course or section from the list to schedule it, drag a class to move it, click anything to edit it.'
+        : 'Drag a course from the list onto a day and time to add the first section, or click a course to fill in the form.'),
       weekGrid({
         sections: state.sections,
+        visible,
         published: state.term.status === 'PUBLISHED',
-        conflictCounts,
-        busyInstructor: view.busyInstructor,
+        conflictsOf,
         availabilityBlocks: view.availabilityBlocks,
         onOpen: (section) => sectionForm(section),
         onMove: moveMeeting,
         palette: paletteGroups(),
+        showWeekends: view.showWeekends,
       }),
-      dated.length > 0 && el('div', { class: 'panel-body dated' },
-        el('h3', {}, 'One-time meetings and exams'),
+      // Every section can have an exam, so this list can be as long as the term: folded until asked for.
+      dated.length > 0 && el('details', { class: 'dated' },
+        el('summary', {}, `One-time meetings and exams (${dated.length})`),
         el('ul', {}, dated.map(({ section, meeting }) => el('li', {},
           el('button', { class: 'btn small quiet', type: 'button', onclick: () => sectionForm(section) }, sectionName(section)),
           ` ${meetingLabel(meeting)}`)))),
     ].filter(Boolean);
   }
 
-  /** Shades an instructor's teaching and declared availability on the grid, or nobody's. */
-  async function showBusyTimes(instructorId) {
+  /** Shows one instructor's sections and their declared availability, or everyone's. */
+  async function chooseInstructor(instructorId) {
     messages.replaceChildren(); // an earlier lookup's error no longer applies
-    view.busyInstructor = instructorId;
+    filter.instructorId = instructorId;
     view.availabilityBlocks = [];
-    let failure = null;
-    if (instructorId && state.term) {
-      try {
-        view.availabilityBlocks = (await fetchAvailability(instructorId, state.term.id)).blocks || [];
-      } catch (error) {
-        if (error instanceof Superseded) return; // a newer choice has taken over
-        failure = error;
-      }
-    } else {
-      fetchAvailability.drop(); // "Nobody": a lookup still on its way no longer applies
+    showSections(); // their sections at once; the availability follows when it arrives
+    if (!instructorId || !state.term) {
+      fetchAvailability.drop(); // "All instructors": a lookup still on its way no longer applies
+      return;
     }
-    render();
-    // Their teaching is still shaded; only the declared availability couldn't be shown.
-    if (failure) showError(failure);
+    try {
+      view.availabilityBlocks = (await fetchAvailability(instructorId, state.term.id)).blocks || [];
+      showSections();
+    } catch (error) {
+      if (error instanceof Superseded) return; // a newer choice has taken over
+      // Their sections are still shown; only the declared availability couldn't be.
+      showError(error);
+    }
   }
 
   /**
@@ -313,6 +428,11 @@ export function timetableScreen(user, setTopbar) {
 
   /** Saves a drag on the grid that moves one of a section's weekly meetings. */
   function moveMeeting(section, index, to) {
+    // Moving within the same weekend day isn't a new weekend class, so it isn't asked about again.
+    if (isWeekend(to.day) && to.day !== section.meetings[index].day && !confirmWeekend([to.day])) {
+      render(); // put the block back
+      return;
+    }
     const moved = { pattern: 'WEEKLY', day: to.day, start: to.start, end: to.end };
     const meetings = section.meetings.map((meeting, i) => (i === index ? moved : asSent(meeting)));
     saveMeetings(section, meetings, `Move ${sectionName(section)} to ${meetingLabel(moved)}?`,
@@ -328,6 +448,7 @@ export function timetableScreen(user, setTopbar) {
       status.textContent = `${sectionName(section)} already meets ${meetingLabel(added)}.`;
       return;
     }
+    if (isWeekend(added.day) && !confirmWeekend([added.day])) return;
     saveMeetings(section, [...section.meetings.map(asSent), added], `Add a meeting to ${sectionName(section)} on ${meetingLabel(added)}?`,
       `${sectionName(section)} now also meets ${meetingLabel(added)}.`);
   }
@@ -516,11 +637,7 @@ export function timetableScreen(user, setTopbar) {
         !section && field('Subject', subjectSelect),
         !section && field('Section number', numberInput),
         field('Room', select('roomId', [['', 'Choose a room'], ...roomOptions], section?.roomId ?? '', { required: true })),
-        el('fieldset', { class: 'group' },
-          el('legend', {}, 'Instructors'),
-          el('div', { class: 'checks' }, state.instructors.map((person) => el('label', { class: 'check' },
-            el('input', { type: 'checkbox', name: 'instructor', value: person.id, checked: chosen.has(person.id) }),
-            person.name)))),
+        checklist('Instructors', 'instructor', state.instructors.map((person) => [person.id, person.name]), chosen),
         el('fieldset', { class: 'group' },
           el('legend', {}, 'Meetings'),
           meetingsBox,
@@ -539,10 +656,16 @@ export function timetableScreen(user, setTopbar) {
             item.name)))),
       ].filter(Boolean),
       onSubmit: async (form) => {
+        const typed = meetings.map((entry) => entry.read());
+        // Only weekend days the section doesn't already meet on are asked about; "Cancel" keeps the form open.
+        const before = new Set((section?.meetings ?? []).filter((meeting) => meeting.pattern === 'WEEKLY').map((meeting) => meeting.day));
+        const weekend = [...new Set(typed.filter((meeting) => meeting.pattern === 'WEEKLY' && isWeekend(meeting.day)
+          && !before.has(meeting.day)).map((meeting) => meeting.day))];
+        if (weekend.length && !confirmWeekend(weekend)) return false;
         const body = {
           roomId: form.get('roomId'),
           instructorIds: form.getAll('instructor'),
-          meetings: meetings.map((entry) => entry.read()),
+          meetings: typed,
           equipment: state.equipment
             .map((item) => ({ equipmentId: item.id, units: Number(form.get(`units-${item.id}`)) }))
             .filter((need) => need.units > 0),

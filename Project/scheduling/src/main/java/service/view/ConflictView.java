@@ -3,6 +3,7 @@ package service.view;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import core.conflict.ConflictMeeting;
 import domain.ConflictType;
 import domain.ResolutionState;
 import domain.Severity;
@@ -24,6 +25,8 @@ public record ConflictView(
 		String equipmentId,
 		String equipmentName,
 		String bookingId,
-		List<String> sectionIds
+		List<String> sectionIds,
+		/** The meetings that clash, each with its section; empty = the sections as a whole (capacity exceeded). */
+		List<ConflictMeeting> meetings
 ) {
 }

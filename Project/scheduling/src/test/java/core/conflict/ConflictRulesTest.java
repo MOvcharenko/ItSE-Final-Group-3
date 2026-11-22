@@ -63,6 +63,49 @@ class ConflictRulesTest {
 	}
 
 	@Test
+	@DisplayName("TC-FR4.3b: A conflict names only the meetings that clash, not every meeting of its sections")
+	void conflictNamesOnlyTheClashingMeetings() {
+		// John Smith teaches CS 201 on Tuesday and Saturday, and BIO 150 on Tuesday: only the Tuesdays clash
+		MeetingTime cs201Tuesday = MeetingTime.weekly(DayOfWeek.TUESDAY, "10:45", "12:15");
+		MeetingTime cs201Saturday = MeetingTime.weekly(DayOfWeek.SATURDAY, "09:00", "10:30");
+		MeetingTime bio150Tuesday = MeetingTime.weekly(DayOfWeek.TUESDAY, "10:30", "11:20");
+		ScheduledMeeting cs201 = new ScheduledMeeting(
+				"sec-cs201", "CS201", "01", "room-301", "301", 40,
+				List.of(cs201Tuesday, cs201Saturday),
+				Set.of("smith"), Map.of("smith", "John Smith"), Map.of(), 25
+		);
+		ScheduledMeeting bio150 = new ScheduledMeeting(
+				"sec-bio150", "BIO 150", "02", "room-310", "310", 40,
+				List.of(bio150Tuesday),
+				Set.of("smith"), Map.of("smith", "John Smith"), Map.of(), 25
+		);
+
+		List<DetectedConflict> conflicts = engine.evaluate(List.of(cs201, bio150), List.of(), List.of(), Map.of(), null);
+
+		assertThat(conflicts).hasSize(1);
+		assertThat(conflicts.getFirst().meetings()).containsExactlyInAnyOrder(
+				ConflictMeeting.of("sec-cs201", cs201Tuesday),
+				ConflictMeeting.of("sec-bio150", bio150Tuesday));
+	}
+
+	@Test
+	@DisplayName("TC-FR4.3e: Capacity exceeded is about the whole section, so it names no single meeting")
+	void capacityExceededNamesNoMeeting() {
+		ScheduledMeeting big = new ScheduledMeeting(
+				"sec-big", "CS 101", "01", "room-small", "Seminar 2", 20,
+				List.of(MeetingTime.weekly(DayOfWeek.MONDAY, "09:00", "09:50")),
+				Set.of("novak"), Map.of(), Map.of(), 35
+		);
+
+		List<DetectedConflict> conflicts = engine.evaluate(List.of(big), List.of(), List.of(), Map.of(), null);
+
+		assertThat(conflicts).singleElement().satisfies(c -> {
+			assertThat(c.type()).isEqualTo(ConflictType.CAPACITY_EXCEEDED);
+			assertThat(c.meetings()).isEmpty();
+		});
+	}
+
+	@Test
 	@DisplayName("TC-FR4.3a: Room double-booking between section and approved room booking is flagged")
 	void roomBookingDoubleBooking() {
 		ScheduledMeeting cs340 = new ScheduledMeeting(
