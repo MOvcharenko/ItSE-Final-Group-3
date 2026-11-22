@@ -1,9 +1,9 @@
 import { addDays, dateRange, dayHeading, hourLabel, longDate, minutes, shortDate, timeRange, today } from './dates.js';
 import { banner, dataTable, el } from './dom.js';
-import { field, openDetails, select } from './forms.js';
+import { field, openDetails, openList, select } from './forms.js';
 import { latestOnly, Superseded } from './http.js';
 import { plural } from './labels.js';
-import { layoutOverlaps } from './layout.js';
+import { fitColumns, layoutOverlaps } from './layout.js';
 import { noticesPanel } from './notices.js';
 import { api } from './scheduling-api.js';
 import { initialTerm, termLabel, termPicker } from './terms.js';
@@ -13,6 +13,9 @@ const FIRST_HOUR = 8;
 const LAST_HOUR = 18;
 const HOUR_PX = 72; // keep in step with --hour in app.css
 const MIN_BLOCK_PX = 24;
+// More meetings side by side than this and each is too thin to read: the rest go behind a "+N more" button.
+const MAX_COLUMNS_WEEK = 3;
+const MAX_COLUMNS_DAY = 6;
 
 // How courses are named on the calendar. A per-viewer choice, so it lives in this browser only.
 const COURSE_DISPLAYS = [['BOTH', 'Code and name'], ['CODE', 'Code'], ['NAME', 'Name']];
@@ -128,9 +131,35 @@ function timeGrid(view) {
         days.map((date) => el('div', { class: date === currentDay ? 'grid-day today' : 'grid-day' }, dayHeading(date)))),
       el('div', { class: 'grid-body' },
         el('div', { class: 'grid-times', style: `height:${height}px` }, hourLabels),
-        days.map((date) => el('div', { class: 'grid-col', style: `height:${height}px` },
-          layoutOverlaps(view.events.filter((event) => event.date === date))
-            .map((placed) => eventBlock(placed, firstHour)))))));
+        days.map((date) => {
+          // A single day has the width for more side by side than a week does.
+          const { shown, more } = fitColumns(layoutOverlaps(view.events.filter((event) => event.date === date)),
+            days.length === 1 ? MAX_COLUMNS_DAY : MAX_COLUMNS_WEEK);
+          return el('div', { class: 'grid-col', style: `height:${height}px` },
+            shown.map((placed) => eventBlock(placed, firstHour)), more.map((group) => moreBlock(group, firstHour)));
+        }))));
+}
+
+/** Stands in for the meetings a crowded time has no room for; opens a list of them. */
+function moreBlock(group, firstHour) {
+  const top = (minutes(group.start) - firstHour * 60) * HOUR_PX / 60;
+  const height = Math.max((minutes(group.end) - minutes(group.start)) * HOUR_PX / 60, MIN_BLOCK_PX);
+  const width = 100 / group.columns;
+  const when = timeRange(group.start, group.end);
+  const count = group.events.length;
+  return el('button', {
+    class: 'block more',
+    type: 'button',
+    style: `top:${top}px;height:${height}px;left:calc(${group.column * width}% + 2px);width:calc(${width}% - 4px)`,
+    'aria-label': `${count} more meetings, ${shortDate(group.events[0].date)}, ${when}. Show them`,
+    title: `${count} more meetings at this time. Filter by course, instructor or room to see them on the grid.`,
+    onclick: () => openList(`${shortDate(group.events[0].date)}, ${when}: ${plural(count, 'more meeting')}`,
+      group.events.map((event) => ({
+        label: courseLabel(event),
+        detail: `${timeRange(event.start, event.end)}, ${roomLabel(event)}${event.instructors.length ? `, ${instructorNames(event)}` : ''}`,
+        onClick: () => showEventDetails(event),
+      }))),
+  }, el('span', { class: 'course' }, `+${count}`));
 }
 
 /** The Term view: one row per meeting, the date only on the first of each day. */
@@ -333,7 +362,6 @@ export function calendarScreen(user, setTopbar) {
     body);
 
   start();
-  return el('div', { class: 'content' },
-    messages,
-    el('div', { class: 'two-col' }, calendarPanel, noticesPanel()));
+  // Notices fold above the calendar rather than beside it, so the week gets the full width.
+  return el('div', { class: 'content' }, messages, noticesPanel(), calendarPanel);
 }

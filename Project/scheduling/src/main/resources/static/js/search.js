@@ -1,5 +1,5 @@
 import { whenLabel } from './dates.js';
-import { banner, dataTable, el } from './dom.js';
+import { banner, dataTable, el, foldingPanel } from './dom.js';
 import { field, input, select } from './forms.js';
 import { latestOnly, Superseded } from './http.js';
 import { plural, ROOM_TYPES, roomTypeLabel } from './labels.js';
@@ -32,9 +32,9 @@ function fillNames(control, anyLabel, names) {
  * Finds rooms or equipment free for a time window, to request one. Returns the panel, plus setCatalog to offer the
  * equipment names and item types that exist (the API matches a whole name, so free text would easily find nothing)
  * and refresh to repeat the last search after a decision has changed what is free. onRequest gets the kind, the
- * resource and the window that was searched.
+ * resource and the window that was searched. open: whether it starts unfolded.
  */
-export function availabilitySearchPanel(onRequest) {
+export function availabilitySearchPanel(onRequest, { open = true } = {}) {
   const kind = select('kind', [['ROOM', 'Room'], ['EQUIPMENT', 'Equipment']], 'ROOM', { onchange: showKind });
   const start = input('start', { type: 'datetime-local', required: true });
   const end = input('end', { type: 'datetime-local', required: true });
@@ -132,8 +132,7 @@ export function availabilitySearchPanel(onRequest) {
     ], items, { cards: true });
   }
 
-  const element = el('section', { class: 'panel' },
-    el('div', { class: 'panel-head' }, el('h2', {}, 'Search availability'), note),
+  const element = foldingPanel([el('h2', {}, 'Search availability'), note], [
     el('form', {
       class: 'toolbar',
       onsubmit: (event) => {
@@ -147,7 +146,7 @@ export function availabilitySearchPanel(onRequest) {
       roomFields,
       itemFields,
       el('button', { class: 'btn primary', type: 'submit' }, 'Search')),
-    results);
+    results], { open });
 
   showKind();
   return { element, setCatalog, refresh: () => { if (lastSearch) search(lastSearch); } };

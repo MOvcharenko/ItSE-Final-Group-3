@@ -1,6 +1,6 @@
 import { dateTime } from './dates.js';
 import { banner, dataTable, el } from './dom.js';
-import { field, openForm, select } from './forms.js';
+import { checklist, field, openForm, select } from './forms.js';
 import { latestOnly, Superseded } from './http.js';
 import { labelOf, meetingLabel, plural } from './labels.js';
 import { api } from './scheduling-api.js';
@@ -55,7 +55,16 @@ export function conflictsScreen(user, setTopbar) {
     });
     return field(labelText, control);
   };
+  // Finds every conflict about one course, room or person: their names are in the explanation and the sections.
+  const findBox = el('input', {
+    type: 'search',
+    class: 'find',
+    placeholder: 'Course, room or instructor',
+    'aria-label': 'Find conflicts',
+    oninput: () => showList(),
+  });
   const toolbar = el('div', { class: 'toolbar' },
+    field('Find', findBox),
     filterSelect('status', 'Show', STATES),
     filterSelect('type', 'Type', [['', 'All types'], ...TYPES]),
     filterSelect('severity', 'Severity', [['', 'All severities'], ...SEVERITIES]));
@@ -123,16 +132,20 @@ export function conflictsScreen(user, setTopbar) {
     const open = state.conflicts.filter((conflict) => conflict.resolutionState === 'OPEN');
     const openHigh = open.filter((conflict) => conflict.severity === 'HIGH').length;
     meta.textContent = `${plural(open.length, 'open conflict')}${openHigh ? `, ${openHigh} High` : ''}`;
+    const words = findBox.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const text = (conflict) => [conflict.explanation, ...affected(conflict).flatMap((section) =>
+      [sectionName(section), section.roomName ?? '', ...section.instructors.map((person) => person.name)])].join(' ').toLowerCase();
     const shown = state.conflicts
       .filter((conflict) => !filters.status || conflict.resolutionState === filters.status)
       .filter((conflict) => !filters.type || conflict.type === filters.type)
       .filter((conflict) => !filters.severity || conflict.severity === filters.severity)
+      .filter((conflict) => !words.length || words.every((word) => text(conflict).includes(word)))
       .sort(bySeverity);
     if (shown.length) {
       list.replaceChildren(el('ul', { class: 'conflict-list' }, shown.map(conflictItem)));
       return;
     }
-    const filtered = filters.type || filters.severity || filters.status !== 'OPEN';
+    const filtered = words.length || filters.type || filters.severity || filters.status !== 'OPEN';
     list.replaceChildren(el('div', { class: 'empty' },
       el('strong', {}, filtered ? 'Nothing matches these filters' : `No open conflicts in ${state.term.name}`),
       filtered
@@ -142,6 +155,7 @@ export function conflictsScreen(user, setTopbar) {
 
   function clearFilters() {
     Object.assign(filters, { status: 'OPEN', type: '', severity: '' });
+    findBox.value = '';
     toolbar.querySelectorAll('select').forEach((control) => { control.value = filters[control.id.replace('conflict-', '')]; });
     showList();
   }
@@ -201,18 +215,16 @@ export function conflictsScreen(user, setTopbar) {
       onchange: () => fillFor(sections.find((section) => section.id === sectionPick.value)),
     });
     const roomPick = select('roomId', [], '');
-    const checks = el('div', { class: 'checks' });
+    const instructorField = el('div');
     const fillFor = (section) => {
       const rooms = state.rooms.filter((room) => room.status === 'AVAILABLE' || room.id === section.roomId);
       roomPick.replaceChildren(...rooms.map((room) => el('option', { value: room.id, selected: room.id === section.roomId },
         `${room.name} (${room.capacity} seats)${room.id === section.roomId ? ', current' : ''}`)));
-      const chosen = new Set(section.instructors.map((person) => person.id));
-      checks.replaceChildren(...state.instructors.map((person) => el('label', { class: 'check' },
-        el('input', { type: 'checkbox', name: 'instructor', value: person.id, checked: chosen.has(person.id) }), person.name)));
+      instructorField.replaceChildren(checklist('Instructors', 'instructor',
+        state.instructors.map((person) => [person.id, person.name]), new Set(section.instructors.map((person) => person.id))));
     };
     fillFor(sections.at(-1));
     const roomField = field('Room', roomPick);
-    const instructorField = el('fieldset', { class: 'group' }, el('legend', {}, 'Instructors'), checks);
 
     openForm({
       title: `Reassign: ${labelOf(TYPES, conflict.type)}`,

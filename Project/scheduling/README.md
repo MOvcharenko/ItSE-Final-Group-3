@@ -98,6 +98,13 @@ This starts the app using the default local profile. The system is then availabl
 
 - `http://localhost:8080/`
 
+While it runs, you don't need to restart it after a change:
+
+- **Frontend** (`src/main/resources/static`: HTML, CSS, JS): save the file and refresh the browser.
+- **Java**: recompile and Spring Boot DevTools restarts the app in a second or two. Run `./mvnw compile` in a second
+  terminal, or let your IDE build on save (VS Code with the Java extension, IntelliJ with "Build project automatically").
+  Changing `pom.xml` or `application*.yml` still needs a full restart.
+
 ### Alternative profiles
 
 ```sh

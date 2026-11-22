@@ -1,5 +1,5 @@
 import { dateTime } from './dates.js';
-import { banner, el } from './dom.js';
+import { banner, el, foldingPanel } from './dom.js';
 import { api } from './scheduling-api.js';
 
 /** Sent with the unread count whenever the panel knows a newer one, for the sidebar. */
@@ -7,12 +7,16 @@ export const UNREAD_COUNTED = 'notices:unread-counted';
 /** Sent when the sidebar finds that the count has changed, so an open panel can catch up. */
 export const NOTICES_CHANGED = 'notices:changed';
 
-/** The "Schedule notices" panel: the signed-in user's own notices, newest first. */
+/**
+ * The "Schedule notices" panel: the signed-in user's own notices, newest first. It folds to one line, and opens by
+ * itself only when something is unread, so the calendar keeps the room otherwise.
+ */
 export function noticesPanel() {
   const meta = el('span', { class: 'meta' });
   const heading = el('h2', { tabindex: '-1' }, 'Schedule notices');
-  const list = el('div', {}, el('div', { class: 'loading' }, 'Loading notices…'));
+  const list = el('div', { class: 'notice-list' }, el('div', { class: 'loading' }, 'Loading notices…'));
   let notices = [];
+  let firstLoad = true;
 
   async function load() {
     try {
@@ -37,7 +41,9 @@ export function noticesPanel() {
   function render() {
     const unread = notices.filter((notice) => !notice.read).length;
     document.dispatchEvent(new CustomEvent(UNREAD_COUNTED, { detail: unread }));
-    meta.textContent = notices.length ? `${unread} unread` : '';
+    meta.textContent = notices.length ? `${unread} unread` : 'None';
+    if (firstLoad && unread) panel.open = true; // later, the reader decides
+    firstLoad = false;
     list.replaceChildren(...(notices.length
       ? notices.map(noticeRow)
       : [el('div', { class: 'empty' }, 'No notices. Changes to your schedule will appear here.')]));
@@ -52,7 +58,7 @@ export function noticesPanel() {
         !notice.read && el('button', { class: 'btn small', type: 'button', onclick: () => markRead(notice) }, 'Mark as read')));
   }
 
-  const panel = el('section', { class: 'panel' }, el('div', { class: 'panel-head' }, heading, meta), list);
+  const panel = foldingPanel([heading, meta], list, { open: false });
   const onChanged = () => {
     if (panel.isConnected) load();
     else document.removeEventListener(NOTICES_CHANGED, onChanged);
