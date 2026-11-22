@@ -1,6 +1,6 @@
 import { banner, dataTable, el } from './dom.js';
 import { latestOnly, Superseded } from './http.js';
-import { meetingLabel, plural, shortDay } from './labels.js';
+import { meetingLines, plural, shortDay } from './labels.js';
 import { api } from './scheduling-api.js';
 import { initialTerm, termPicker } from './terms.js';
 
@@ -28,7 +28,7 @@ function schedulePanel(teaching, me) {
       el('div', {}, el('strong', {}, `${section.courseCode} · ${section.sectionNumber}`)),
       el('div', { class: 'muted' }, section.courseTitle)) },
     { label: 'Meets', cell: (section) => el('div', {},
-      section.meetings.map((meeting) => el('div', { class: 'nowrap' }, meetingLabel(meeting)))) },
+      meetingLines(section.meetings).map((line) => el('div', { class: 'nowrap' }, line))) },
     { label: 'Room', cell: (section) => (section.roomName
       ? el('div', {}, el('div', {}, section.roomName), el('div', { class: 'muted' }, section.building))
       : el('span', { class: 'tag cancelled' }, 'No room yet')) },

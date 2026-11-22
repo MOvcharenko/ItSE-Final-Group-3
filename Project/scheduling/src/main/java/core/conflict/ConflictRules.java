@@ -123,13 +123,13 @@ public class ConflictRules {
 									s1.displayName() + " (" + m1.formatWindow() + ") and " +
 									s2.displayName() + " (" + m2.formatWindow() + ") overlap.";
 
-							conflicts.putIfAbsent(fp, DetectedConflict.roomDoubleBooking(
+							record(conflicts, fp, DetectedConflict.roomDoubleBooking(
 									explanation,
 									fp,
 									s1.roomId(),
 									null,
 									List.of(s1.sectionId(), s2.sectionId())
-							));
+							), ConflictMeeting.of(s1.sectionId(), m1), ConflictMeeting.of(s2.sectionId(), m2));
 						}
 					}
 				}
@@ -154,13 +154,13 @@ public class ConflictRules {
 								s.displayName() + " (" + m.formatWindow() + ") and Booking '" +
 								b.purpose() + "' (" + bWindow + ") overlap.";
 
-						conflicts.putIfAbsent(fp, DetectedConflict.roomDoubleBooking(
+						record(conflicts, fp, DetectedConflict.roomDoubleBooking(
 								explanation,
 								fp,
 								s.roomId(),
 								b.bookingId(),
 								List.of(s.sectionId())
-						));
+						), ConflictMeeting.of(s.sectionId(), m));
 					}
 				}
 			}
@@ -197,12 +197,12 @@ public class ConflictRules {
 											s2.displayName() + " (" + m2.formatWindow() + ") overlap by " +
 											overlapMinutes + " minutes.";
 
-									conflicts.putIfAbsent(fp, DetectedConflict.instructorOverlap(
+									record(conflicts, fp, DetectedConflict.instructorOverlap(
 											explanation,
 											fp,
 											instId,
 											List.of(s1.sectionId(), s2.sectionId())
-									));
+									), ConflictMeeting.of(s1.sectionId(), m1), ConflictMeeting.of(s2.sectionId(), m2));
 								}
 							}
 						}
@@ -234,12 +234,12 @@ public class ConflictRules {
 							String explanation = "Instructor " + block.instructorName() + " is unavailable during " +
 									s.displayName() + " (" + m.formatWindow() + ").";
 
-							conflicts.putIfAbsent(fp, DetectedConflict.instructorUnavailable(
+							record(conflicts, fp, DetectedConflict.instructorUnavailable(
 									explanation,
 									fp,
 									instId,
 									s.sectionId()
-							));
+							), ConflictMeeting.of(s.sectionId(), m));
 						}
 					}
 				}
@@ -267,6 +267,8 @@ public class ConflictRules {
 					int totalUnitsRequested = sUnits;
 					List<String> affectedSections = new ArrayList<>();
 					affectedSections.add(s.sectionId());
+					List<ConflictMeeting> clashing = new ArrayList<>();
+					clashing.add(ConflictMeeting.of(s.sectionId(), m));
 					String matchedBookingId = null;
 
 					// Check other sections needing the same equipment overlapping with m
@@ -285,6 +287,7 @@ public class ConflictRules {
 								if (!affectedSections.contains(other.sectionId())) {
 									affectedSections.add(other.sectionId());
 								}
+								clashing.add(ConflictMeeting.of(other.sectionId(), otherM));
 							}
 						}
 					}
@@ -310,13 +313,13 @@ public class ConflictRules {
 								totalUnitsRequested + " units requested during " + m.formatWindow() +
 								", but only " + capacity + " available.";
 
-						conflicts.putIfAbsent(fp, DetectedConflict.equipmentDoubleBooking(
+						record(conflicts, fp, DetectedConflict.equipmentDoubleBooking(
 								explanation,
 								fp,
 								equip.id(),
 								matchedBookingId,
 								affectedSections
-						));
+						), clashing.toArray(ConflictMeeting[]::new));
 					}
 				}
 			}
@@ -375,17 +378,27 @@ public class ConflictRules {
 										" and " + s2.displayName() + ": " + shared +
 										" shared students have overlapping meetings (" + m1.formatWindow() + ").";
 
-								conflicts.putIfAbsent(fp, DetectedConflict.studentGroupClash(
+								record(conflicts, fp, DetectedConflict.studentGroupClash(
 										explanation,
 										fp,
 										List.of(s1.sectionId(), s2.sectionId())
-								));
+								), ConflictMeeting.of(s1.sectionId(), m1), ConflictMeeting.of(s2.sectionId(), m2));
 							}
 						}
 					}
 				}
 			}
 		}
+	}
+
+	/**
+	 * Keeps a conflict under its fingerprint. Found again (the same clash at another pair of meetings), it keeps its
+	 * explanation and gains the new meetings, so every meeting that clashes is named.
+	 */
+	private static void record(Map<String, DetectedConflict> conflicts, String fingerprint, DetectedConflict found,
+			ConflictMeeting... meetings) {
+		DetectedConflict withMeetings = found.withMeetings(List.of(meetings));
+		conflicts.merge(fingerprint, withMeetings, DetectedConflict::mergedWith);
 	}
 
 	private boolean meetingOverlapsBooking(MeetingTime m, ScheduledBooking b) {

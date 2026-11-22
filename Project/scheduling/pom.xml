@@ -58,6 +58,14 @@
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
 
+		<!-- Development only: restarts the app when compiled classes change, and turns off resource caching.
+		     Optional, so it is left out of the packaged jar; it switches itself off in tests. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
 		<dependency>
 			<groupId>com.h2database</groupId>
 			<artifactId>h2</artifactId>
@@ -110,6 +118,14 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<!-- "mvnw spring-boot:run" serves the UI (HTML, CSS, JS) straight from the source folder, so an edit
+					     shows on the next browser refresh without a restart. The copy on the classpath is the fallback.
+					     Relative to this module, where spring-boot:run starts; the packaged jar and tests are unaffected. -->
+					<systemPropertyVariables>
+						<spring.web.resources.static-locations>file:src/main/resources/static/,classpath:/static/</spring.web.resources.static-locations>
+					</systemPropertyVariables>
+				</configuration>
 			</plugin>
 			<!-- Runs *IT integration tests during `mvn verify` -->
 			<plugin>

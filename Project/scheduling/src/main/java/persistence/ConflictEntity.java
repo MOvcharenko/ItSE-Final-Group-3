@@ -1,10 +1,14 @@
 package persistence;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+
+import core.conflict.ConflictMeeting;
 
 import domain.ConflictType;
 import domain.ResolutionState;
@@ -77,6 +81,11 @@ public class ConflictEntity extends AssignedIdEntity {
 	@CollectionTable(name = "conflict_section", joinColumns = @JoinColumn(name = "conflict_id"))
 	@Column(name = "section_id", nullable = false, length = 36)
 	private Set<String> sectionIds = new LinkedHashSet<>();
+
+	/** The meetings that clash; none = the sections as a whole (capacity exceeded). */
+	@ElementCollection
+	@CollectionTable(name = "conflict_meeting", joinColumns = @JoinColumn(name = "conflict_id"))
+	private List<ConflictMeetingRow> meetings = new ArrayList<>();
 
 	protected ConflictEntity() {
 	}
@@ -189,6 +198,19 @@ public class ConflictEntity extends AssignedIdEntity {
 
 	public void addSectionId(String sectionId) {
 		this.sectionIds.add(sectionId);
+	}
+
+	public List<ConflictMeeting> getMeetings() {
+		return meetings.stream().map(ConflictMeetingRow::toMeeting).toList();
+	}
+
+	/** Replaces the clashing meetings, writing nothing when they are the same as before. */
+	public void setMeetings(Collection<ConflictMeeting> clashing) {
+		List<ConflictMeetingRow> rows = clashing.stream().map(ConflictMeetingRow::new).toList();
+		if (!rows.equals(meetings)) {
+			meetings.clear();
+			meetings.addAll(rows);
+		}
 	}
 
 	public boolean isOpen() {

@@ -33,7 +33,7 @@ public final class Td1Loader {
 
 	/** Every application table, children before parents, so deletes never violate a foreign key. */
 	static final List<String> TABLES_CHILD_FIRST = List.of(
-			"notice", "insight_suggestion", "audit_log_entry", "conflict_section", "conflict",
+			"notice", "insight_suggestion", "audit_log_entry", "conflict_meeting", "conflict_section", "conflict",
 			"instructor_equipment_need", "availability_submission", "instructor_availability",
 			"booking", "section_equipment", "section_instructor", "section_meeting", "section",
 			"import_row", "import_batch", "term",

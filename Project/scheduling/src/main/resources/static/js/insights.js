@@ -1,4 +1,4 @@
-import { banner, dataTable, el } from './dom.js';
+import { banner, dataTable, el, foldingPanel } from './dom.js';
 import { latestOnly, Superseded } from './http.js';
 import { plural } from './labels.js';
 import { api } from './scheduling-api.js';
@@ -35,15 +35,16 @@ function suggestionCard(suggestion, onDismiss) {
     el('p', { class: 'insight-card-message' }, suggestion.message));
 }
 
+/** Folded when long, so the utilization tables below stay in reach. */
 function suggestionsPanel(suggestions, onDismiss) {
-  return el('section', { class: 'panel insight-panel' },
-    el('div', { class: 'panel-head' },
-      el('h2', {}, 'Advisory suggestions'),
-      el('span', { class: 'meta' }, plural(suggestions.length, 'suggestion'))),
+  return foldingPanel([
+    el('h2', {}, 'Advisory suggestions'),
+    el('span', { class: 'meta' }, plural(suggestions.length, 'suggestion'))],
     el('div', { class: 'panel-body' },
       suggestions.length === 0
         ? el('p', { class: 'hint' }, 'No active suggestions for this term. Schedule utilization is healthy!')
-        : el('div', { class: 'insight-cards-grid' }, suggestions.map((suggestion) => suggestionCard(suggestion, onDismiss)))));
+        : el('div', { class: 'insight-cards-grid' }, suggestions.map((suggestion) => suggestionCard(suggestion, onDismiss)))),
+    { open: suggestions.length <= 6 });
 }
 
 /** Scheduled against declared hours, capped at a full bar. */

@@ -267,6 +267,8 @@ public class DefaultConflictService implements ConflictService {
 					existing.reopen(now);
 					existing.setExplanation(d.explanation());
 				}
+				// Which meetings clash can change while the conflict stays (e.g. a third meeting added).
+				existing.setMeetings(d.meetings());
 			} else {
 				ConflictEntity newConflict = ConflictEntity.create(
 						term, d.type(), d.severity(), d.explanation(), d.fingerprint(), now
@@ -286,6 +288,7 @@ public class DefaultConflictService implements ConflictService {
 				if (d.sectionIds() != null) {
 					newConflict.setSectionIds(d.sectionIds());
 				}
+				newConflict.setMeetings(d.meetings());
 				conflicts.save(newConflict);
 			}
 		}
@@ -418,7 +421,8 @@ public class DefaultConflictService implements ConflictService {
 				c.getEquipment() != null ? c.getEquipment().getId() : null,
 				c.getEquipment() != null ? c.getEquipment().getName() : null,
 				c.getBooking() != null ? c.getBooking().getId() : null,
-				new ArrayList<>(c.getSectionIds())
+				new ArrayList<>(c.getSectionIds()),
+				c.getMeetings()
 		);
 	}
 }

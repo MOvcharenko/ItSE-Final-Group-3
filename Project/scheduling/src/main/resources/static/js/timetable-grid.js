@@ -3,9 +3,12 @@
 // block or list item opens the matching form, where the same change can be typed.
 import { hourLabel, minutes, timeRange } from './dates.js';
 import { el } from './dom.js';
+import { openList } from './forms.js';
 import { DAYS, plural, shortDay } from './labels.js';
-import { layoutOverlaps } from './layout.js';
+import { fitColumns, layoutOverlaps } from './layout.js';
 
+// More classes side by side than this and each is too thin to read: the rest go behind a "+N more" button.
+const MAX_COLUMNS = 3;
 const FIRST_HOUR = 8;
 const LAST_HOUR = 18;
 const HOUR_PX = 72; // keep in step with --hour in app.css
@@ -38,15 +41,19 @@ function busyFor(section, items) {
 }
 
 /**
- * sections: the term's sections. conflictCounts: open conflicts per section id. busyInstructor: an instructor id whose
- * teaching is shaded, or ''. availabilityBlocks: declared availability blocks for busyInstructor.
+ * sections: all the term's sections. visible(section): whether its blocks are drawn (a filter); hidden sections still
+ * count when a drag shades clashes, so a clash is never missed. conflictsOf(section, meeting): open conflicts that
+ * meeting is in.
+ * availabilityBlocks: one instructor's declared availability, shaded behind the blocks.
  * onOpen(section) opens the form; onMove(section, index, {day, start, end}) saves a drag.
  * palette: groups shown beside the grid, [{ heading, items: [{ label, detail, duration, section?, onClick, onDrop }] }].
  * An item dropped on the grid calls onDrop({day, start, end}); one with a section shades that section's busy times.
+ * showWeekends adds Saturday and Sunday; without it a weekend day appears only when something already meets on it.
  */
-export function weekGrid({ sections, published, conflictCounts, busyInstructor, availabilityBlocks = [], onOpen, onMove, palette = [] }) {
+export function weekGrid({ sections, visible = () => true, published, conflictsOf = () => 0, availabilityBlocks = [], onOpen, onMove, palette = [], showWeekends = false }) {
   const items = weeklyItems(sections);
-  const days = DAYS.filter(([value], index) => index < 5 || items.some((item) => item.day === value)).map(([value]) => value);
+  const shownItems = items.filter((item) => visible(item.section));
+  const days = DAYS.filter(([value], index) => index < 5 || showWeekends || items.some((item) => item.day === value)).map(([value]) => value);
   const firstHour = Math.min(FIRST_HOUR, ...items.map((item) => Math.floor(item.start / 60)));
   const lastHour = Math.max(LAST_HOUR, ...items.map((item) => Math.ceil(item.end / 60)));
   const height = (lastHour - firstHour) * HOUR_PX;
@@ -63,33 +70,49 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
     }, el('span', {}, label)));
   }
 
-  // The chosen instructor's teaching, shaded behind the blocks; their own blocks stay bright and the rest dim
-  const chosen = busyInstructor ? items.filter((item) => item.section.instructors.some((person) => person.id === busyInstructor)) : [];
-  chosen.forEach((item) => band({ ...item, label: `Busy: ${item.section.courseCode}` }, 'overlay'));
-
-  // The chosen instructor's declared availability blocks (FR1.4 overlay lens)
-  if (busyInstructor && availabilityBlocks && availabilityBlocks.length) {
-    availabilityBlocks.forEach((ab) => {
-      const sMin = minutes(ab.startTime);
-      const eMin = minutes(ab.endTime);
-      const kind = ab.status === 'UNAVAILABLE' ? 'overlay-unavailable' : 'overlay-prefer';
-      const lbl = ab.status === 'UNAVAILABLE' ? 'Unavailable' : 'Preferred';
-      band({ day: ab.dayOfWeek, start: sMin, end: eMin, label: `${lbl} (declared)` }, kind);
-    });
-  }
+  // One instructor's declared availability (FR1.4 overlay lens); Open blocks need no shading
+  availabilityBlocks.filter((block) => block.status !== 'OPEN').forEach((block) => {
+    const unavailable = block.status === 'UNAVAILABLE';
+    band({ day: block.dayOfWeek, start: minutes(block.startTime), end: minutes(block.endTime),
+      label: unavailable ? 'Unavailable (declared)' : 'Preferred (declared)' }, unavailable ? 'overlay-unavailable' : 'overlay-prefer');
+  });
 
   days.forEach((day) => {
-    layoutOverlaps(items.filter((item) => item.day === day).map((item) => ({ ...item, start: hhmm(item.start), end: hhmm(item.end), item })))
-      .forEach(({ event, column, columns: count }) => columns.get(day).append(block(event.item, column, count)));
+    const placed = layoutOverlaps(shownItems.filter((item) => item.day === day)
+      .map((item) => ({ ...item, start: hhmm(item.start), end: hhmm(item.end), item })));
+    const { shown, more } = fitColumns(placed, MAX_COLUMNS);
+    shown.forEach(({ event, column, columns: count }) => columns.get(day).append(block(event.item, column, count)));
+    more.forEach((group) => columns.get(day).append(moreButton(day, group)));
   });
+
+  /** Stands in for the classes a crowded time has no room for; opens a list of them. */
+  function moreButton(day, group) {
+    const width = 100 / group.columns;
+    const when = timeRange(group.start, group.end);
+    const label = `+${group.events.length}`; // a third of a day column: "more" is in the tooltip and the label
+    return el('button', {
+      class: 'block more',
+      type: 'button',
+      style: `top:${toPx(minutes(group.start))}px;height:${Math.max(toPx(minutes(group.end)) - toPx(minutes(group.start)), 24)}px;`
+        + `left:calc(${group.column * width}% + 2px);width:calc(${width}% - 4px)`,
+      'aria-label': `${group.events.length} more classes, ${shortDay(day)} ${when}. Show them`,
+      title: `${group.events.length} more classes at this time. Filter by room or instructor to see them on the grid.`,
+      onclick: () => openList(`${shortDay(day)} ${when}: ${plural(group.events.length, 'more class', 'more classes')}`,
+        group.events.map(({ item }) => ({
+          label: `${item.section.courseCode} · ${item.section.sectionNumber}`,
+          detail: `${timeRange(item.meeting.start, item.meeting.end)}, ${item.section.roomName ?? 'no room'}`
+            + (item.section.instructors.length ? `, ${item.section.instructors.map((person) => person.name).join(', ')}` : ''),
+          onClick: () => onOpen(item.section),
+        }))),
+    }, el('span', { class: 'course' }, label));
+  }
 
   function block(item, column, count) {
     const { section } = item;
     const width = 100 / count;
-    const conflicts = conflictCounts.get(section.id) ?? 0;
+    const conflicts = conflictsOf(section, item.meeting);
     const when = timeRange(item.meeting.start, item.meeting.end);
-    const dim = busyInstructor && !section.instructors.some((person) => person.id === busyInstructor);
-    const classes = ['block', 'draggable', published ? 'published' : 'draft', conflicts && 'has-conflict', count > 1 && 'narrow', dim && 'dim'];
+    const classes = ['block', 'draggable', published ? 'published' : 'draft', conflicts && 'has-conflict', count > 1 && 'narrow'];
     const node = el('button', {
       class: classes.filter(Boolean).join(' '),
       type: 'button',
@@ -233,8 +256,9 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
   const gridBox = el('div', { class: 'scroll-x' }, grid);
   if (!palette.some((group) => group.items.length)) return gridBox;
 
-  const groups = palette.filter((group) => group.items.length).map((group) => el('div', { class: 'palette-group' },
-    el('h3', {}, group.heading),
+  // Each group folds away, so a long list of courses doesn't push the sections out of reach.
+  const groups = palette.filter((group) => group.items.length).map((group) => el('details', { class: 'palette-group', open: true },
+    el('summary', {}, group.heading, el('span', { class: 'count' }, String(group.items.length))),
     el('ul', {}, group.items.map(paletteItem))));
   const none = el('p', { class: 'hint', hidden: true }, 'Nothing matches.');
   const find = el('input', {
@@ -251,6 +275,7 @@ export function weekGrid({ sections, published, conflictCounts, busyInstructor, 
           if (!li.hidden) inGroup++;
         });
         group.hidden = inGroup === 0;
+        if (text && inGroup) group.open = true; // a match in a folded group is still found
         shown += inGroup;
       });
       none.hidden = shown > 0;
