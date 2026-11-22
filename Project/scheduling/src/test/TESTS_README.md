@@ -1,5 +1,12 @@
 # Scheduling Test Suite Overview
 
+## Executed test results
+
+The Maven `verify` run executed 624 individual Surefire/Failsafe test invocations: 624 passed and 0 failed or skipped.
+
+- [Test results table (Markdown)](TEST_RESULTS_TABLE.md)
+- [Test results table (CSV)](TEST_RESULTS_TABLE.csv)
+
 This folder contains the automated test suite for the scheduling application. The tests cover the domain model, persistence layer, business services, API endpoints, security rules, schema checks, and import workflow. They are written in JUnit 5 and run with the `test` Spring profile, using the in-memory H2 configuration defined in `resources/application-test.yml`.
 
 ## Test configuration
