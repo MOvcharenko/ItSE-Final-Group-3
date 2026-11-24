@@ -2,7 +2,7 @@
 
 ## Executed test results
 
-The Maven `verify` run executed 624 individual Surefire/Failsafe test invocations: 624 passed and 0 failed or skipped.
+The Maven `verify` run executed 647 individual Surefire/Failsafe test invocations: 647 passed and 0 failed or skipped.
 
 - [Test results table (Markdown)](TEST_RESULTS_TABLE.md)
 - [Test results table (CSV)](TEST_RESULTS_TABLE.csv)
@@ -50,6 +50,10 @@ These files provide fixed datasets used by the test suite.
 ## Test classes and what they validate
 
 ### API tests
+
+- `api/AutoScheduleApiIT.java`
+  - Tests the SAT/MaxSAT auto-scheduling REST API.
+  - Verifies conflict-free TD-1 rebuilds, keep-existing mode, distinct "Try Another Option" solutions, published-term locking, and role restrictions.
 
 - `api/AvailabilityApiIT.java`
   - Tests the instructor availability API.
@@ -126,6 +130,10 @@ These files provide fixed datasets used by the test suite.
 - `core/importing/ImportFileParserTest.java`
   - Verifies the import parser converts raw CSV rows into typed domain objects.
   - Ensures validation errors are surfaced correctly.
+
+- `core/solver/TimetableSatSolverTest.java`
+  - Pure unit tests for the SAT/MaxSAT timetable solver.
+  - Verifies independent conflict checks, fixed-section and booking avoidance, room/equipment/capacity constraints, split-day prevention, preferences, and room-fit optimization.
 
 - `core/insights/UtilizationCalculatorTest.java`
   - Tests utilization and occupancy calculations used in insights and analytics.
