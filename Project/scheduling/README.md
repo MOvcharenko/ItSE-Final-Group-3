@@ -33,6 +33,7 @@ The application is structured around three user roles:
 ### Core features
 
 - Scheduling term creation, editing, copy, and publication
+- Automated Draft timetable generation using a Sat4j Weighted PB-MaxSAT solver (`Auto-Fill Schedule`) with convenience optimization and side-by-side option comparison
 - Section creation with conflict detection and conflict review tools
 - Instructor availability and preferred/unavailable time blocks
 - Room and equipment catalog management
@@ -230,6 +231,7 @@ The web front end is implemented as plain HTML, CSS, and JavaScript modules with
 | `js/forms.js` | Reusable form behaviors and validation messaging |
 | `js/calendar.js` | Calendar views and notifications |
 | `js/timetable.js` | Term and section scheduling workflows |
+| `js/auto-schedule.js` | SAT/MaxSAT Auto-Fill Schedule modal (configure preferences, compare generated options, preview quality metrics, apply to Draft) |
 | `js/conflicts.js` | Conflict review and resolution tools |
 | `js/insights.js` | Optimization insights dashboard |
 | `js/catalog.js` | Resource and catalog management |

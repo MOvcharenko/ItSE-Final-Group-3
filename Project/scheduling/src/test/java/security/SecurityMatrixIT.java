@@ -40,6 +40,7 @@ import com.jayway.jsonpath.JsonPath;
 import app.SchedulingApplication;
 import domain.Role;
 import persistence.AppUserRepository;
+import service.AutoScheduleService;
 import service.AvailabilityService;
 import service.BookingService;
 import service.CalendarService;
@@ -128,7 +129,9 @@ class SecurityMatrixIT {
 			new Endpoint("PUT", "/api/terms/{id}/availability/me", "", "{\"blocks\":[]}", 200, INSTRUCTOR),
 			new Endpoint("GET", "/api/instructors/{id}/availability", "?termId=X1", null, 200, STAFF),
 			new Endpoint("GET", "/api/terms/{id}/insights", "", null, 200, SCHEDULER),
-			new Endpoint("POST", "/api/insights/{id}/dismiss", "", null, 204, SCHEDULER));
+			new Endpoint("POST", "/api/insights/{id}/dismiss", "", null, 204, SCHEDULER),
+			new Endpoint("POST", "/api/terms/{id}/auto-schedule/preview", "", "{}", 200, SCHEDULER),
+			new Endpoint("POST", "/api/terms/{id}/auto-schedule/apply", "", "{\"placements\":[{\"subjectId\":\"S1\",\"roomId\":\"R1\",\"instructorIds\":[\"U02\"],\"meetings\":[{\"pattern\":\"WEEKLY\",\"day\":\"MONDAY\",\"start\":\"09:00\",\"end\":\"09:50\"}]}]}", 200, SCHEDULER));
 
 	@Autowired
 	MockMvc mvc;
@@ -167,6 +170,9 @@ class SecurityMatrixIT {
 	@MockitoBean
 	CalendarService calendar;
 
+	@MockitoBean
+	AutoScheduleService autoSchedule;
+
 	static Stream<Arguments> everyEndpointAndRole() {
 		return ENDPOINTS.stream().flatMap(e -> Stream.of(DevAccount.values()).map(a -> Arguments.of(e, a)));
 	}
@@ -183,7 +189,7 @@ class SecurityMatrixIT {
 		mvc.perform(endpoint.toRequest(tokenFor(account.id)))
 			.andExpect(status().is(allowed ? endpoint.success() : 403));
 		if (!allowed) {
-			verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar);
+			verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar, autoSchedule);
 		}
 	}
 
@@ -192,7 +198,7 @@ class SecurityMatrixIT {
 	@DisplayName("TC-NFR1.4: no token is 401 on every endpoint")
 	void noToken(Endpoint endpoint) throws Exception {
 		mvc.perform(endpoint.toRequest(null)).andExpect(status().isUnauthorized());
-		verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar);
+		verifyNoInteractions(catalog, bookings, imports, timetable, notices, calendar, autoSchedule);
 	}
 
 	@Test

@@ -1,3 +1,4 @@
+import { openAutoScheduleModal } from './auto-schedule.js';
 import { dateRange } from './dates.js';
 import { actionMenu, banner, dataTable, el } from './dom.js';
 import { checklist, field, input, openForm, select } from './forms.js';
@@ -210,9 +211,24 @@ export function timetableScreen(user, setTopbar) {
     setTopbar([picker.select, ...details], actions);
   }
 
+  function openAutoFill() {
+    openAutoScheduleModal({
+      term: state.term,
+      subjects: state.subjects,
+      sections: state.sections,
+      instructors: state.instructors,
+      onApplied: async (count) => {
+        messages.replaceChildren();
+        await selectTerm(state.term.id);
+        status.textContent = `Auto-scheduled ${plural(count, 'section')} with 0 conflicts.`;
+      },
+    });
+  }
+
   function sectionsPanel() {
     const missing = [!state.subjects.length && 'subject', !state.rooms.length && 'room'].filter(Boolean);
     const open = state.conflicts.length;
+    const draft = state.term.status === 'DRAFT';
     const modes = [['grid', 'Week grid'], ['list', 'List']].map(([mode, text]) => el('button', {
       type: 'button',
       'aria-pressed': String(view.mode === mode),
@@ -224,6 +240,7 @@ export function timetableScreen(user, setTopbar) {
         !missing.length && el('div', { class: 'segmented', role: 'group', 'aria-label': 'Show sections as' }, modes),
         open > 0 && el('a', { class: 'tag sev-high', href: '#conflicts' }, plural(open, 'open conflict')),
         el('span', { class: 'meta' }, plural(state.sections.length, 'section')),
+        !missing.length && draft && el('button', { class: 'btn small primary', type: 'button', onclick: openAutoFill }, 'Auto-Fill Schedule'),
         !missing.length && el('button', { class: 'btn small', type: 'button', onclick: () => sectionForm() }, 'Add section')));
     if (missing.length) {
       return [head, el('div', { class: 'empty' },
@@ -235,7 +252,9 @@ export function timetableScreen(user, setTopbar) {
     if (!state.sections.length && view.mode !== 'grid') {
       return [head, el('div', { class: 'empty' },
         el('strong', {}, 'No sections in this term yet'),
-        el('button', { class: 'btn primary', type: 'button', onclick: () => sectionForm() }, 'Add the first section'))];
+        el('div', { class: 'crumb' },
+          draft && el('button', { class: 'btn primary', type: 'button', onclick: openAutoFill }, 'Auto-Fill Schedule'),
+          el('button', { class: 'btn', type: 'button', onclick: () => sectionForm() }, 'Add the first section')))];
     }
     const noRoom = sectionsWithoutRoom();
     showSections();

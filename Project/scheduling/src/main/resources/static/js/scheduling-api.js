@@ -36,6 +36,10 @@ export class SchedulingApi {
   /** assignment: { roomId, instructorIds }, each optional. */
   reassignSection(sectionId, assignment) { return this.http.patch(`/api/sections/${id(sectionId)}/assignment`, assignment); }
 
+  // --- auto-schedule (SAT/MaxSAT) ------------------------------------------
+  previewAutoSchedule(termId, request) { return this.http.post(`/api/terms/${id(termId)}/auto-schedule/preview`, request); }
+  applyAutoSchedule(termId, request) { return this.http.post(`/api/terms/${id(termId)}/auto-schedule/apply`, request); }
+
   // --- conflicts and insights ----------------------------------------------
   /** status: OPEN, RESOLVED or DISMISSED; all of them when left out. */
   conflicts(termId, status) { return this.http.getJson(`/api/terms/${id(termId)}/conflicts${status ? `?${query({ status })}` : ''}`); }

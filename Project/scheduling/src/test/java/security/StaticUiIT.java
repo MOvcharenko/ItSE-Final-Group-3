@@ -28,7 +28,7 @@ class StaticUiIT {
 
 	@ParameterizedTest
 	@ValueSource(strings = { "/", "/index.html", "/signin-callback.html", "/auth/config", "/css/app.css", "/js/app.js",
-			"/js/auth.js", "/js/bookings.js", "/js/calendar.js", "/js/catalog.js", "/js/conflicts.js", "/js/dates.js",
+			"/js/auth.js", "/js/auto-schedule.js", "/js/bookings.js", "/js/calendar.js", "/js/catalog.js", "/js/conflicts.js", "/js/dates.js",
 			"/js/dom.js", "/js/forms.js", "/js/http.js", "/js/import.js", "/js/insights.js", "/js/labels.js", "/js/layout.js",
 			"/js/notices.js", "/js/scheduling-api.js", "/js/search.js", "/js/session.js", "/js/shell.js",
 			"/js/signin-callback.js", "/js/teaching.js", "/js/terms.js", "/js/timetable.js", "/js/timetable-grid.js" })
